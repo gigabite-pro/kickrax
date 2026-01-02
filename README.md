@@ -1,8 +1,8 @@
-# DripStock 🔥👟
+# KickStar 🔥👟
 
 > Canada's Sneaker Price Comparison Platform - Verified Resellers Only
 
-DripStock helps you find the best sneaker prices across verified Canadian resellers. Think of it as Skyscanner for sneakers - without the scammers.
+KickStar helps you find the best sneaker prices across verified Canadian resellers. Think of it as Skyscanner for sneakers - without the scammers.
 
 ## Features
 

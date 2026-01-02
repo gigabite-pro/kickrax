@@ -50,7 +50,7 @@ export default function AboutPage() {
             className="text-center mb-16"
           >
             <h1 className="font-display text-6xl md:text-7xl mb-6">
-              ABOUT <span className="gradient-text">DRIPSTOCK</span>
+              ABOUT <span className="gradient-text">KICKSTAR</span>
             </h1>
             <p className="text-drip-silver text-xl max-w-2xl mx-auto">
               Stop overpaying for sneakers. We built DripStock to help the Canadian sneaker community find the best deals across all major reselling platforms.

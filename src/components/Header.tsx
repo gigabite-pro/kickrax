@@ -13,7 +13,7 @@ export default function Header() {
             <div className="absolute inset-0 blur-lg bg-accent-fire/30 group-hover:bg-accent-fire/50 transition-colors" />
           </div>
           <span className="font-display text-3xl tracking-wide">
-            DRIP<span className="text-accent-fire">STOCK</span>
+            KICK<span className="text-accent-fire">STAR</span>
           </span>
         </Link>
         

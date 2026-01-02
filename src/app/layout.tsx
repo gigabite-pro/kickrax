@@ -2,8 +2,8 @@ import type { Metadata } from 'next'
 import './globals.css'
 
 export const metadata: Metadata = {
-  title: 'DripStock | Canada\'s Sneaker Price Comparison',
-  description: 'Find the best sneaker prices across Canadian resellers. Compare StockX, GOAT, eBay Canada, and more.',
+  title: 'KickStar | Canada\'s Sneaker Price Comparison',
+  description: 'Find the best sneaker prices across Canadian resellers. Compare StockX, GOAT, Flight Club, and more.',
   keywords: 'sneakers, canada, price comparison, stockx, goat, resell, kicks, jordans, nike, adidas',
 }
 

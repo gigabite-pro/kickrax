@@ -2,7 +2,7 @@ import { MongoClient, Db } from 'mongodb';
 import { AggregatedSneaker } from '@/types';
 
 const MONGODB_URI = process.env.MONGODB_URI || '';
-const MONGODB_DB = process.env.MONGODB_DB || 'dripstock';
+const MONGODB_DB = process.env.MONGODB_DB || 'kickstar';
 const CACHE_TTL_SECONDS = 60; // 1 minute cache
 
 let cachedClient: MongoClient | null = null;
