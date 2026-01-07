@@ -1,5 +1,3 @@
-'use client';
-
 import { useState, useCallback } from 'react';
 import { Search, Loader2, Sparkles } from 'lucide-react';
 import { motion } from 'framer-motion';
@@ -93,5 +91,3 @@ export default function SearchBar({ onSearch, isLoading = false }: SearchBarProp
     </div>
   );
 }
-
-

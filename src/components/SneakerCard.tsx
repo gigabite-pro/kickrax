@@ -1,9 +1,6 @@
-'use client';
-
 import { motion } from 'framer-motion';
 import { ExternalLink, TrendingDown, TrendingUp, Minus, ShieldCheck } from 'lucide-react';
-import { AggregatedSneaker, SneakerListing } from '@/types';
-import Image from 'next/image';
+import { AggregatedSneaker, SneakerListing } from '../types';
 
 interface SneakerCardProps {
   sneaker: AggregatedSneaker;
@@ -31,13 +28,11 @@ function getPriceIndicator(listing: SneakerListing, average: number) {
 }
 
 const sourceColors: Record<string, string> = {
-  // Major authenticated platforms
   stockx: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30',
   goat: 'bg-purple-500/20 text-purple-400 border-purple-500/30',
   grailed: 'bg-red-500/20 text-red-400 border-red-500/30',
   'flight-club': 'bg-orange-500/20 text-orange-400 border-orange-500/30',
   'stadium-goods': 'bg-blue-500/20 text-blue-400 border-blue-500/30',
-  // Canadian retailers
   livestock: 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30',
   haven: 'bg-cyan-500/20 text-cyan-400 border-cyan-500/30',
   capsule: 'bg-pink-500/20 text-pink-400 border-pink-500/30',
@@ -58,15 +53,11 @@ export default function SneakerCard({ sneaker, index }: SneakerCardProps) {
       {/* Image Section */}
       <div className="relative aspect-square bg-gradient-to-br from-drip-charcoal to-drip-graphite p-6 overflow-hidden">
         {sneaker.imageUrl ? (
-          <div className="relative w-full h-full">
-            <Image
-              src={sneaker.imageUrl}
-              alt={sneaker.name}
-              fill
-              className="object-contain group-hover:scale-105 transition-transform duration-500"
-              sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 33vw"
-            />
-          </div>
+          <img
+            src={sneaker.imageUrl}
+            alt={sneaker.name}
+            className="w-full h-full object-contain group-hover:scale-105 transition-transform duration-500"
+          />
         ) : (
           <div className="w-full h-full flex items-center justify-center">
             <span className="text-6xl">👟</span>

@@ -1,90 +1,107 @@
-# KickStar 🔥👟
+# KickStar 👟🇨🇦
 
-> Canada's Sneaker Price Comparison Platform - Verified Resellers Only
-
-KickStar helps you find the best sneaker prices across verified Canadian resellers. Think of it as Skyscanner for sneakers - without the scammers.
-
-## Features
-
-- **10+ Verified Resellers**: StockX, GOAT, Flight Club, Stadium Goods, Grailed + Canadian stores
-- **Canada Focused**: All prices in CAD
-- **No Scammers**: Only authenticated/verified platforms (no eBay/Kijiji)
-- **Simple Caching**: Results cached for 1 minute to speed up repeat searches
-- **Refresh Button**: Force fresh prices anytime
-
-## Data Sources
-
-### Authenticated Platforms
-- StockX, GOAT, Flight Club, Stadium Goods, Grailed
-
-### Canadian Retailers
-- Livestock (Toronto), Haven (Vancouver), Capsule Toronto, Exclucity, NRML (Ottawa)
-
-## Getting Started
-
-### Quick Start (No Database)
-```bash
-npm install
-npm run dev
-```
-Works immediately - just does live scraping on each search.
-
-### With Caching (Optional MongoDB)
-```bash
-# Set environment variable
-export MONGODB_URI=mongodb://localhost:27017
-
-npm run dev
-```
-Caches search results for 1 minute so repeat searches are instant.
-
-## How It Works
-
-1. User searches for "Jordan 1"
-2. Check MongoDB cache (if configured)
-3. If cached result < 1 minute old → return instantly
-4. Otherwise → scrape all 10 sources in parallel
-5. Save to cache for next person
-6. Return results
+Canada's sneaker price comparison platform. Compare prices across 10+ verified resellers to find the best deals on sneakers.
 
 ## Tech Stack
 
-- **Next.js 14** (App Router)
-- **MongoDB** (optional, for caching)
-- **Tailwind CSS** + Framer Motion
-- **Axios + Cheerio** for scraping
+- **Frontend**: React + Vite + TypeScript
+- **Backend**: Express + Node.js
+- **Styling**: Tailwind CSS + Framer Motion
+- **Database**: MongoDB (optional, for 1-minute caching)
+- **Scrapers**: Cheerio + Axios
+
+## Features
+
+- 🔍 Search across 10+ verified resellers simultaneously
+- 💰 All prices in CAD for easy comparison
+- 🛡️ Only verified/authenticated sellers (no scammers)
+- 🇨🇦 Focus on Canadian sneaker community
+- ⚡ Fast 1-minute caching with MongoDB
+- 📱 Beautiful, responsive UI
+
+## Verified Sources
+
+**Global Platforms:**
+- StockX (authenticated)
+- GOAT (authenticated)
+- Flight Club (authenticated)
+- Stadium Goods (authenticated)
+- Grailed (verified)
+
+**Canadian Retailers:**
+- Livestock (Deadstock.ca) 🇨🇦
+- Haven 🇨🇦
+- Capsule Toronto 🇨🇦
+- Exclucity 🇨🇦
+- NRML 🇨🇦
+
+## Getting Started
+
+### Prerequisites
+
+- Node.js 18+
+- npm or yarn
+- MongoDB (optional, for caching)
+
+### Installation
+
+```bash
+# Clone the repo
+git clone https://github.com/gigabite-pro/kickstar.git
+cd kickstar
+
+# Install dependencies
+npm install
+
+# Create environment file (optional, for MongoDB)
+cp .env.example .env
+# Edit .env with your MongoDB credentials
+
+# Start development servers
+npm run dev
+```
+
+This runs:
+- Frontend at http://localhost:5173
+- Backend at http://localhost:3001
+
+### Environment Variables
+
+Create a `.env` file with:
+
+```
+MONGODB_URI=your_mongodb_connection_string
+MONGODB_DB=kickstar
+```
+
+MongoDB is optional - the app works without it, but caching will be disabled.
 
 ## Project Structure
 
 ```
-src/
-├── app/
-│   ├── api/
-│   │   ├── search/route.ts    # Main search endpoint
-│   │   └── refresh/route.ts   # Force refresh endpoint
-│   └── page.tsx               # Home page
-├── components/                 # UI components
-├── lib/
-│   ├── db/mongodb.ts          # Simple cache layer
-│   └── scrapers/
-│       ├── registry.ts        # Source configuration
-│       └── sources/           # 10 scraper files
-└── types/index.ts
+kickstar/
+├── src/                  # Frontend (React + Vite)
+│   ├── components/       # React components
+│   ├── pages/           # Page components
+│   ├── types.ts         # TypeScript types
+│   └── main.tsx         # Entry point
+├── server/              # Backend (Express)
+│   ├── scrapers/        # Web scrapers
+│   ├── db/              # MongoDB connection
+│   └── index.ts         # Express server
+└── package.json
 ```
 
-## Environment Variables
+## Scripts
 
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `MONGODB_URI` | No | MongoDB connection string |
-| `MONGODB_DB` | No | Database name (default: dripstock) |
+```bash
+npm run dev          # Start both frontend and backend
+npm run dev:frontend # Start only Vite frontend
+npm run dev:backend  # Start only Express backend
+npm run build        # Build for production
+npm run preview      # Preview production build
+```
 
-## Why No eBay/Kijiji?
+## License
 
-- Too many scammers selling fakes
-- No authentication guarantee
-- We only include platforms that verify authenticity
-
----
-
-Built with 🔥 for the Canadian sneaker community.
+MIT

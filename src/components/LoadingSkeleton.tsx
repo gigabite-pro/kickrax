@@ -1,5 +1,3 @@
-'use client';
-
 import { motion } from 'framer-motion';
 
 export default function LoadingSkeleton() {
@@ -45,5 +43,3 @@ export default function LoadingSkeleton() {
     </div>
   );
 }
-
-
