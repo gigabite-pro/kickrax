@@ -13,6 +13,10 @@ export interface KickscrewSizePricing {
  * Search KicksCrew by SKU and get all size prices from the first result
  */
 export async function searchKickscrewBySku(sku: string): Promise<KickscrewSizePricing | null> {
+    console.log(`[KICKSCREW] ========== STARTING KICKSCREW SCRAPE ==========`);
+    console.log(`[KICKSCREW] SKU: ${sku}`);
+    console.log(`[KICKSCREW] Launching browser...`);
+    
     const browser = await puppeteer.launch({
         headless: true,
         args: [
@@ -23,9 +27,11 @@ export async function searchKickscrewBySku(sku: string): Promise<KickscrewSizePr
             "--window-size=1920,1080",
         ],
     });
+    console.log(`[KICKSCREW] Browser launched`);
 
     try {
         const page = await browser.newPage();
+        console.log(`[KICKSCREW] New page created`);
 
         // Set viewport
         await page.setViewport({ width: 1920, height: 1080 });
@@ -44,116 +50,192 @@ export async function searchKickscrewBySku(sku: string): Promise<KickscrewSizePr
             "Accept-Language": "en-CA,en;q=0.9",
             Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
         });
+        console.log(`[KICKSCREW] Page configured (viewport, user agent, headers)`);
+
+        // Listen for response to log HTTP status
+        page.on('response', response => {
+            const url = response.url();
+            if (url.includes('kickscrew.com') && !url.includes('.js') && !url.includes('.css') && !url.includes('.png') && !url.includes('.jpg')) {
+                console.log(`[KICKSCREW] HTTP ${response.status()} - ${url.substring(0, 80)}`);
+            }
+        });
 
         // Step 1: Search KicksCrew with the SKU
-        const searchUrl = `https://www.kickscrew.com/en-CA/search?keyword=${encodeURIComponent(sku)}`;
-        console.log(`[KICKSCREW] Searching: ${searchUrl}`);
+        const searchUrl = `https://www.kickscrew.com/en-CA/search?q=${encodeURIComponent(sku)}`;
+        console.log(`[KICKSCREW] Step 1: Navigating to search URL...`);
+        console.log(`[KICKSCREW] URL: ${searchUrl}`);
 
-        await page.goto(searchUrl, {
-            waitUntil: "networkidle2",
-            timeout: 30000,
-        });
+        const startTime = Date.now();
+        try {
+            await page.goto(searchUrl, {
+                waitUntil: "domcontentloaded",
+                timeout: 30000,
+            });
+            console.log(`[KICKSCREW] Search page loaded in ${Date.now() - startTime}ms`);
+        } catch (navError) {
+            console.log(`[KICKSCREW] Navigation error after ${Date.now() - startTime}ms: ${navError}`);
+            // Try to continue anyway - page might have partially loaded
+        }
+        
+        // Log current URL to see if we got redirected
+        const currentUrl = await page.url();
+        console.log(`[KICKSCREW] Current URL after navigation: ${currentUrl}`);
 
         // Wait for search results to load
         await new Promise((resolve) => setTimeout(resolve, 3000));
+
+        // Wait for the product grid to appear
+        try {
+            await page.waitForSelector('ul li a[href*="/products/"]', { timeout: 10000 });
+            console.log("[KICKSCREW] Product grid loaded");
+        } catch (e) {
+            console.log("[KICKSCREW] Product grid not found, checking page...");
+        }
 
         // Debug: Check page content
         const searchPageDebug = await page.evaluate(() => {
             const html = document.body.innerHTML;
             const productLinks = Array.from(document.querySelectorAll('a[href*="/products/"]'));
+            const listItems = Array.from(document.querySelectorAll('ul li'));
             return {
                 htmlLength: html.length,
                 productLinkCount: productLinks.length,
+                listItemCount: listItems.length,
                 firstFewLinks: productLinks.slice(0, 5).map(l => l.getAttribute("href")),
+                pageTitle: document.title,
+                currentUrl: window.location.href,
             };
         });
         console.log(`[KICKSCREW] Search page HTML length: ${searchPageDebug.htmlLength}`);
         console.log(`[KICKSCREW] Product links found: ${searchPageDebug.productLinkCount}`);
+        console.log(`[KICKSCREW] List items found: ${searchPageDebug.listItemCount}`);
+        console.log(`[KICKSCREW] Page title: ${searchPageDebug.pageTitle}`);
         if (searchPageDebug.firstFewLinks.length > 0) {
             console.log(`[KICKSCREW] First links:`, searchPageDebug.firstFewLinks);
         }
 
-        // Step 2: Find the first product link
-        const productUrl = await page.evaluate(() => {
-            // Find product cards/links in search results
+        // Step 2: Find product link (prefer one with SKU in URL)
+        const skuLower = sku.toLowerCase().replace(/-/g, "");
+        
+        const productUrl = await page.evaluate((skuLower) => {
+            // Find all product links
             const productLinks = Array.from(document.querySelectorAll('a[href*="/products/"]'));
 
+            // First try to find one with the SKU in the URL
             for (const link of productLinks) {
                 const href = link.getAttribute("href") || "";
-                // Skip non-product links
+                const hrefLower = href.toLowerCase().replace(/-/g, "");
+                if (hrefLower.includes(skuLower)) {
+                    return href.startsWith("http") ? href : `https://www.kickscrew.com${href}`;
+                }
+            }
+
+            // Fallback: get the first product link
+            for (const link of productLinks) {
+                const href = link.getAttribute("href") || "";
                 if (href.includes("/products/") && !href.includes("/collections/")) {
                     return href.startsWith("http") ? href : `https://www.kickscrew.com${href}`;
                 }
             }
 
             return null;
-        });
+        }, skuLower);
 
         if (!productUrl) {
             console.log("[KICKSCREW] No product found for SKU:", sku);
-            // Debug: Log page title and URL
-            const debugInfo = await page.evaluate(() => ({
-                title: document.title,
-                url: window.location.href,
-            }));
-            console.log(`[KICKSCREW] Page title: ${debugInfo.title}`);
-            console.log(`[KICKSCREW] Current URL: ${debugInfo.url}`);
+            console.log(`[KICKSCREW] Current URL: ${searchPageDebug.currentUrl}`);
             return null;
         }
 
         console.log(`[KICKSCREW] Found product: ${productUrl}`);
 
         // Step 3: Navigate to the product page
-        await page.goto(productUrl, {
-            waitUntil: "networkidle2",
-            timeout: 30000,
-        });
+        console.log(`[KICKSCREW] Step 3: Navigating to product page...`);
+        const productStartTime = Date.now();
+        try {
+            await page.goto(productUrl, {
+                waitUntil: "domcontentloaded",
+                timeout: 30000,
+            });
+            console.log(`[KICKSCREW] Product page loaded in ${Date.now() - productStartTime}ms`);
+        } catch (navError) {
+            console.log(`[KICKSCREW] Product page navigation error after ${Date.now() - productStartTime}ms: ${navError}`);
+            // Try to continue anyway
+        }
+        
+        // Log current URL
+        const productCurrentUrl = await page.url();
+        console.log(`[KICKSCREW] Product page URL: ${productCurrentUrl}`);
 
         // Wait for page load
-        await new Promise((resolve) => setTimeout(resolve, 3000));
+        await new Promise((resolve) => setTimeout(resolve, 2000));
 
-        // Debug: Check product page content
-        const productPageDebug = await page.evaluate(() => {
-            const html = document.body.innerHTML;
-            const hasSizeOption = html.includes('data-testid="size-option');
-            const hasDataAvailable = html.includes('data-available');
-            const sizeElements = document.querySelectorAll('[data-testid^="size-option-"]');
-            const h1 = document.querySelector('h1')?.textContent || 'NO H1';
-            return {
-                htmlLength: html.length,
-                hasSizeOption,
-                hasDataAvailable,
-                sizeElementCount: sizeElements.length,
-                h1Title: h1,
-                currentUrl: window.location.href,
-            };
+        // Get product name first
+        const productName = await page.evaluate(() => {
+            return document.querySelector('h1')?.textContent?.trim() || 'Unknown Product';
         });
-        console.log(`[KICKSCREW] Product page HTML length: ${productPageDebug.htmlLength}`);
-        console.log(`[KICKSCREW] Has size-option in HTML: ${productPageDebug.hasSizeOption}`);
-        console.log(`[KICKSCREW] Has data-available in HTML: ${productPageDebug.hasDataAvailable}`);
-        console.log(`[KICKSCREW] Size elements found: ${productPageDebug.sizeElementCount}`);
-        console.log(`[KICKSCREW] H1 Title: ${productPageDebug.h1Title}`);
-        console.log(`[KICKSCREW] Current URL: ${productPageDebug.currentUrl}`);
+        console.log(`[KICKSCREW] Product: ${productName}`);
 
-        // Wait for size list to load
+        // Step 4: Click on .size-picker to open size dropdown
+        console.log(`[KICKSCREW] Step 4: Looking for .size-picker button...`);
+        
+        try {
+            await page.waitForSelector('.size-picker', { timeout: 10000 });
+            console.log(`[KICKSCREW] Found .size-picker, clicking...`);
+            await page.click('.size-picker');
+            await new Promise((resolve) => setTimeout(resolve, 1500));
+            console.log(`[KICKSCREW] Clicked .size-picker`);
+        } catch (e) {
+            console.log(`[KICKSCREW] .size-picker not found, trying alternative selectors...`);
+            
+            // Try alternative selectors
+            const altSelectors = [
+                'button[aria-label*="size"]',
+                '[class*="size-picker"]',
+                '[class*="SizePicker"]',
+                'button:has-text("Select Size")',
+            ];
+            
+            for (const selector of altSelectors) {
+                try {
+                    const el = await page.$(selector);
+                    if (el) {
+                        console.log(`[KICKSCREW] Found alternative: ${selector}`);
+                        await el.click();
+                        await new Promise((resolve) => setTimeout(resolve, 1500));
+                        break;
+                    }
+                } catch (err) {
+                    // Continue trying
+                }
+            }
+        }
+
+        // Wait for size options to appear after clicking
+        console.log(`[KICKSCREW] Step 5: Waiting for size options to appear...`);
         try {
             await page.waitForSelector('[data-testid^="size-option-"]', { timeout: 10000 });
-            console.log("[KICKSCREW] Size options loaded via waitForSelector");
+            console.log("[KICKSCREW] Size options appeared!");
         } catch (e) {
-            console.log("[KICKSCREW] Size options not found via waitForSelector, trying to scroll...");
+            console.log("[KICKSCREW] Size options still not found after clicking");
             
-            // Try scrolling to trigger lazy loading
-            await page.evaluate(() => {
-                window.scrollBy(0, 500);
+            // Debug: Check what's in the DOM now
+            const debugHtml = await page.evaluate(() => {
+                const radixContent = document.querySelector('[data-radix-menu-content]');
+                return {
+                    hasRadixMenu: !!radixContent,
+                    radixHtml: radixContent?.innerHTML?.substring(0, 500) || 'NOT FOUND',
+                };
             });
-            await new Promise((resolve) => setTimeout(resolve, 2000));
-            
-            // Check again
-            const retryCount = await page.evaluate(() => {
-                return document.querySelectorAll('[data-testid^="size-option-"]').length;
-            });
-            console.log(`[KICKSCREW] After scroll, size elements: ${retryCount}`);
+            console.log(`[KICKSCREW] Has radix menu: ${debugHtml.hasRadixMenu}`);
+            console.log(`[KICKSCREW] Radix content: ${debugHtml.radixHtml}`);
         }
+        
+        // Check count of size elements
+        const sizeCount = await page.evaluate(() => {
+            return document.querySelectorAll('[data-testid^="size-option-"]').length;
+        });
+        console.log(`[KICKSCREW] Size elements found: ${sizeCount}`);
 
         // Extract sizes and product info using page.evaluate
         const extractedData = await page.evaluate(() => {
@@ -230,6 +312,7 @@ export async function searchKickscrewBySku(sku: string): Promise<KickscrewSizePr
         sizes.sort((a, b) => parseFloat(a.size) - parseFloat(b.size));
 
         console.log(`[KICKSCREW] Found ${sizes.length} sizes with prices`);
+        console.log(`[KICKSCREW] ========== KICKSCREW SCRAPE COMPLETE ==========`);
 
         return {
             productName: extractedData.productName,
@@ -238,10 +321,13 @@ export async function searchKickscrewBySku(sku: string): Promise<KickscrewSizePr
             sizes,
         };
     } catch (error) {
-        console.error("[KICKSCREW] Scraping error:", error);
+        console.error("[KICKSCREW] ========== KICKSCREW SCRAPE FAILED ==========");
+        console.error("[KICKSCREW] Error:", error);
         return null;
     } finally {
+        console.log(`[KICKSCREW] Closing browser...`);
         await browser.close();
+        console.log(`[KICKSCREW] Browser closed`);
     }
 }
 
