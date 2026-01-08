@@ -5,6 +5,7 @@ import { searchStockXCatalog, getProductStyleId } from "./scrapers/sources/stock
 import { searchGoatBySku } from "./scrapers/sources/goat.js";
 import { searchKickscrewBySku } from "./scrapers/sources/kickscrew.js";
 import { searchFlightClubBySku } from "./scrapers/sources/flight-club.js";
+import { searchStadiumGoodsBySku } from "./scrapers/sources/stadiumgoods.js";
 
 dotenv.config();
 
@@ -73,7 +74,7 @@ app.get("/api/product/style", async (req, res) => {
     try {
         console.log(`[API] Getting Style ID from: ${url}`);
         const styleId = await getProductStyleId(url);
-        
+
         console.log(`[API] Style ID: ${styleId}`);
 
         res.json({
@@ -106,65 +107,54 @@ app.get("/api/goat/prices", async (req, res) => {
         console.log(`[API] Fetching prices for SKU: ${sku}`);
 
         // Fetch from all sources in parallel
-        const [goatResult, kickscrewResult, flightClubResult] = await Promise.all([
+        const [goatResult, kickscrewResult, flightClubResult, stadiumGoodsResult] = await Promise.all([
             searchGoatBySku(sku),
             searchKickscrewBySku(sku),
             searchFlightClubBySku(sku),
+            searchStadiumGoodsBySku(sku),
         ]);
 
         const duration = Date.now() - startTime;
 
-        // Print GOAT sizes to console
-        if (goatResult && goatResult.sizes.length > 0) {
-            console.log(`[API] GOAT found ${goatResult.sizes.length} sizes`);
-            console.log("\n=================================");
-            console.log(`GOAT PRICES FOR: ${goatResult.productName}`);
-            console.log(`URL: ${goatResult.productUrl}`);
-            console.log("=================================");
-            goatResult.sizes.forEach((s) => {
-                console.log(`  Size ${s.size}: CA$${s.priceCAD} (US$${s.price})`);
-            });
-            console.log("=================================\n");
+        // Print all sizes from each source
+        console.log(`\n========== RESULTS FOR SKU: ${sku} (${duration}ms) ==========`);
+
+        if (goatResult?.sizes?.length) {
+            console.log(`\n[GOAT] ${goatResult.sizes.length} sizes:`);
+            console.log(`  ${goatResult.sizes.map((s) => `${s.size}=$${s.priceCAD}`).join(", ")}`);
         } else {
-            console.log(`[API] GOAT: No sizes found`);
+            console.log(`\n[GOAT] No sizes found`);
         }
 
-        // Print KicksCrew sizes to console
-        if (kickscrewResult && kickscrewResult.sizes.length > 0) {
-            console.log(`[API] KicksCrew found ${kickscrewResult.sizes.length} sizes`);
-            console.log("\n=================================");
-            console.log(`KICKSCREW PRICES FOR: ${kickscrewResult.productName}`);
-            console.log(`URL: ${kickscrewResult.productUrl}`);
-            console.log("=================================");
-            kickscrewResult.sizes.forEach((s) => {
-                console.log(`  Size ${s.size}: CA$${s.priceCAD} (US$${s.price})`);
-            });
-            console.log("=================================\n");
+        if (kickscrewResult?.sizes?.length) {
+            console.log(`\n[KICKSCREW] ${kickscrewResult.sizes.length} sizes:`);
+            console.log(`  ${kickscrewResult.sizes.map((s) => `${s.size}=$${s.priceCAD}`).join(", ")}`);
         } else {
-            console.log(`[API] KicksCrew: No sizes found`);
+            console.log(`\n[KICKSCREW] No sizes found`);
         }
 
-        // Print FlightClub sizes to console
-        if (flightClubResult && flightClubResult.sizes.length > 0) {
-            console.log(`[API] FlightClub found ${flightClubResult.sizes.length} sizes`);
-            console.log("\n=================================");
-            console.log(`FLIGHTCLUB PRICES`);
-            console.log("=================================");
-            flightClubResult.sizes.forEach((s) => {
-                console.log(`  Size ${s.size}: CA$${s.priceCAD}`);
-            });
-            console.log("=================================\n");
+        if (flightClubResult?.sizes?.length) {
+            console.log(`\n[FLIGHTCLUB] ${flightClubResult.sizes.length} sizes:`);
+            console.log(`  ${flightClubResult.sizes.map((s) => `${s.size}=$${s.priceCAD}`).join(", ")}`);
         } else {
-            console.log(`[API] FlightClub: No sizes found`);
+            console.log(`\n[FLIGHTCLUB] No sizes found`);
         }
 
-        console.log(`[API] Total time: ${duration}ms`);
+        if (stadiumGoodsResult?.sizes?.length) {
+            console.log(`\n[STADIUMGOODS] ${stadiumGoodsResult.sizes.length} sizes:`);
+            console.log(`  ${stadiumGoodsResult.sizes.map((s) => `${s.size}=$${s.price}`).join(", ")}`);
+        } else {
+            console.log(`\n[STADIUMGOODS] No sizes found`);
+        }
+
+        console.log(`\n====================================================\n`);
 
         res.json({
             sku,
             goat: goatResult,
             kickscrew: kickscrewResult,
             flightclub: flightClubResult,
+            stadiumgoods: stadiumGoodsResult,
             meta: {
                 duration,
                 timestamp: new Date().toISOString(),
@@ -248,50 +238,54 @@ app.get("/api/prices", async (req, res) => {
         console.log(`[API] Fetching prices from all sources for SKU: ${sku}`);
 
         // Fetch from all sources in parallel
-        const [goatResult, kickscrewResult, flightClubResult] = await Promise.all([
+        const [goatResult, kickscrewResult, flightClubResult, stadiumGoodsResult] = await Promise.all([
             searchGoatBySku(sku),
             searchKickscrewBySku(sku),
             searchFlightClubBySku(sku),
+            searchStadiumGoodsBySku(sku),
         ]);
 
         const duration = Date.now() - startTime;
 
-        // Print GOAT sizes to console
-        if (goatResult && goatResult.sizes.length > 0) {
-            console.log("\n=================================");
-            console.log(`GOAT PRICES FOR: ${goatResult.productName}`);
-            console.log("=================================");
-            goatResult.sizes.forEach((s) => {
-                console.log(`  Size ${s.size}: CA$${s.priceCAD}`);
-            });
+        // Print all sizes from each source
+        console.log(`\n========== ALL SOURCES - SKU: ${sku} (${duration}ms) ==========`);
+
+        if (goatResult?.sizes?.length) {
+            console.log(`\n[GOAT] ${goatResult.sizes.length} sizes:`);
+            console.log(`  ${goatResult.sizes.map((s) => `${s.size}=$${s.priceCAD}`).join(", ")}`);
+        } else {
+            console.log(`\n[GOAT] No sizes found`);
         }
 
-        // Print KicksCrew sizes to console
-        if (kickscrewResult && kickscrewResult.sizes.length > 0) {
-            console.log("\n=================================");
-            console.log(`KICKSCREW PRICES FOR: ${kickscrewResult.productName}`);
-            console.log("=================================");
-            kickscrewResult.sizes.forEach((s) => {
-                console.log(`  Size ${s.size}: CA$${s.priceCAD}`);
-            });
+        if (kickscrewResult?.sizes?.length) {
+            console.log(`\n[KICKSCREW] ${kickscrewResult.sizes.length} sizes:`);
+            console.log(`  ${kickscrewResult.sizes.map((s) => `${s.size}=$${s.priceCAD}`).join(", ")}`);
+        } else {
+            console.log(`\n[KICKSCREW] No sizes found`);
         }
 
-        // Print FlightClub sizes to console
-        if (flightClubResult && flightClubResult.sizes.length > 0) {
-            console.log("\n=================================");
-            console.log(`FLIGHTCLUB PRICES`);
-            console.log("=================================");
-            flightClubResult.sizes.forEach((s) => {
-                console.log(`  Size ${s.size}: CA$${s.priceCAD}`);
-            });
+        if (flightClubResult?.sizes?.length) {
+            console.log(`\n[FLIGHTCLUB] ${flightClubResult.sizes.length} sizes:`);
+            console.log(`  ${flightClubResult.sizes.map((s) => `${s.size}=$${s.priceCAD}`).join(", ")}`);
+        } else {
+            console.log(`\n[FLIGHTCLUB] No sizes found`);
         }
-        console.log("=================================\n");
+
+        if (stadiumGoodsResult?.sizes?.length) {
+            console.log(`\n[STADIUMGOODS] ${stadiumGoodsResult.sizes.length} sizes:`);
+            console.log(`  ${stadiumGoodsResult.sizes.map((s) => `${s.size}=$${s.price}`).join(", ")}`);
+        } else {
+            console.log(`\n[STADIUMGOODS] No sizes found`);
+        }
+
+        console.log(`\n====================================================\n`);
 
         res.json({
             sku,
             goat: goatResult,
             kickscrew: kickscrewResult,
             flightclub: flightClubResult,
+            stadiumgoods: stadiumGoodsResult,
             meta: {
                 duration,
                 timestamp: new Date().toISOString(),

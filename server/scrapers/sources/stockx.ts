@@ -1,21 +1,19 @@
-import puppeteer from "puppeteer";
+import puppeteer, { Browser, Page } from "puppeteer";
 import * as cheerio from "cheerio";
 import { SOURCES, SneakerListing, CatalogProduct } from "../../types.js";
 import { ScraperResult, generateListingId } from "../types.js";
+import { launchBrowser, createPage, getPuppeteerOptions } from "../browser.js";
 
 // Keep browser instance alive for performance
-let browser: puppeteer.Browser | null = null;
+let browser: Browser | null = null;
 
-async function getBrowser(): Promise<puppeteer.Browser> {
+async function getBrowser(): Promise<Browser> {
     if (browser && browser.isConnected()) {
         return browser;
     }
 
     console.log("[StockX] Launching browser...");
-    browser = await puppeteer.launch({
-        headless: true,
-        args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage", "--disable-accelerated-2d-canvas", "--no-first-run", "--no-zygote", "--disable-gpu"],
-    });
+    browser = await puppeteer.launch(getPuppeteerOptions());
 
     return browser;
 }
@@ -39,7 +37,7 @@ function generateStockXImageUrl(slug: string): string {
  * Extract image URL from DOM, or generate it
  * Prioritizes actual DOM URLs to avoid 404s
  */
-function getImageUrl($tile: cheerio.Cheerio<cheerio.Element>, slug: string): string {
+function getImageUrl($tile: cheerio.Cheerio<cheerio.AnyNode>, slug: string): string {
     // First, try to get actual image from DOM (if lazy loaded)
     const $img = $tile.find("img").first();
 
@@ -94,7 +92,7 @@ function getImageUrl($tile: cheerio.Cheerio<cheerio.Element>, slug: string): str
  * URL: https://stockx.com/search?s=jordan+1
  */
 export async function searchStockXCatalog(query: string): Promise<CatalogProduct[]> {
-    let page: puppeteer.Page | null = null;
+    let page: Page | null = null;
 
     try {
         const searchUrl = `https://stockx.com/search?s=${encodeURIComponent(query)}`;
@@ -351,15 +349,10 @@ export async function searchStockX(query: string): Promise<ScraperResult> {
  * Scrapes the Product Details section for the Style value
  */
 export async function getProductStyleId(productUrl: string): Promise<string | null> {
-    const browser = await puppeteer.launch({
-        headless: true,
-        args: ["--no-sandbox", "--disable-setuid-sandbox"],
-    });
+    const browser = await launchBrowser();
 
     try {
-        const page = await browser.newPage();
-
-        await page.setUserAgent("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
+        const page = await createPage(browser);
 
         console.log(`[StockX] Loading product page: ${productUrl}`);
 

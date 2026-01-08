@@ -37,13 +37,34 @@ Canada's sneaker price comparison platform. Compare prices across 10+ verified r
 
 ## Getting Started
 
-### Prerequisites
+### Option 1: Docker (Recommended) 🐳
+
+The easiest way to run the app - no setup required!
+
+```bash
+# Clone the repo
+git clone https://github.com/gigabite-pro/kickstar.git
+cd kickstar
+
+# Build and run with Docker
+docker-compose up --build
+```
+
+That's it! The app will be running at:
+- Frontend: http://localhost:5173
+- Backend API: http://localhost:3001
+
+To stop: `docker-compose down`
+
+### Option 2: Local Development
+
+#### Prerequisites
 
 - Node.js 18+
 - npm or yarn
 - MongoDB (optional, for caching)
 
-### Installation
+#### Installation
 
 ```bash
 # Clone the repo
