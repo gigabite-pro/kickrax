@@ -1,4 +1,5 @@
 import { useState, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import Header from '../components/Header';
 import SearchBar from '../components/SearchBar';
 import LoadingSkeleton from '../components/LoadingSkeleton';
@@ -13,55 +14,13 @@ interface StockXProductCardProps {
 }
 
 function StockXProductCard({ product, index }: StockXProductCardProps) {
-  const handleClick = async (e: React.MouseEvent) => {
-    e.preventDefault();
-    
-    console.log(`\n🔍 Clicked on: ${product.name}`);
-    console.log(`📍 Fetching Style ID from: ${product.stockxUrl}`);
-    
-    try {
-      // Step 1: Get Style ID from StockX
-      const styleResponse = await fetch(`/api/product/style?url=${encodeURIComponent(product.stockxUrl)}`);
-      const styleData = await styleResponse.json();
-      
-      console.log('=================================');
-      console.log(`📦 Product: ${product.name}`);
-      console.log(`🏷️  Style ID: ${styleData.styleId}`);
-      console.log('=================================');
-      
-      if (styleData.styleId) {
-        // Step 2: Search GOAT with the Style ID
-        console.log(`\n🐐 Searching GOAT for SKU: ${styleData.styleId}...`);
-        
-        const goatResponse = await fetch(`/api/goat/prices?sku=${encodeURIComponent(styleData.styleId)}`);
-        const goatData = await goatResponse.json();
-        
-        if (goatData.product) {
-          console.log('\n=================================');
-          console.log(`🐐 GOAT PRICES FOR: ${goatData.product.productName}`);
-          console.log(`🔗 URL: ${goatData.product.productUrl}`);
-          console.log('=================================');
-          
-          if (goatData.product.sizes.length > 0) {
-            goatData.product.sizes.forEach((s: { size: string; priceCAD: number; price: number }) => {
-              console.log(`  Size ${s.size}: CA$${s.priceCAD} (US$${s.price})`);
-            });
-          } else {
-            console.log('  No size/price data found');
-          }
-          console.log('=================================\n');
-        } else {
-          console.log('❌ Product not found on GOAT');
-        }
-      }
-      
-      // After logging, open the StockX page
-      window.open(product.stockxUrl, '_blank');
-    } catch (error) {
-      console.error('Error:', error);
-      // Still open the page even if API fails
-      window.open(product.stockxUrl, '_blank');
-    }
+  const navigate = useNavigate();
+
+  const handleClick = () => {
+    // Navigate to product detail page with product data
+    navigate(`/product/${encodeURIComponent(product.sku)}`, { 
+      state: { product } 
+    });
   };
 
   return (
@@ -89,16 +48,26 @@ function StockXProductCard({ product, index }: StockXProductCardProps) {
           </div>
         )}
         
+        {/* Price badge */}
+        {product.stockxLowestAsk > 0 && (
+          <div className="absolute bottom-4 left-4 bg-accent-mint text-drip-black text-sm font-bold px-3 py-1.5 rounded-full">
+            CA${product.stockxLowestAsk}
+          </div>
+        )}
+        
         {/* Subtle overlay on hover */}
         <div className="absolute inset-0 bg-gradient-to-t from-drip-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
       </div>
       
-      {/* Info - Minimal */}
+      {/* Info - Full name */}
       <div className="p-5">
         <p className="text-accent-fire text-xs font-medium mb-2 uppercase tracking-wide">{product.brand}</p>
-        <h3 className="text-drip-white font-semibold text-base leading-tight line-clamp-2 group-hover:text-accent-mint transition-colors">
+        <h3 className="text-drip-white font-semibold text-sm leading-snug group-hover:text-accent-mint transition-colors">
           {product.name}
         </h3>
+        {product.sku && (
+          <p className="text-drip-smoke text-xs mt-2 font-mono">{product.sku}</p>
+        )}
       </div>
     </motion.div>
   );
