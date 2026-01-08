@@ -4,6 +4,7 @@ import dotenv from "dotenv";
 import { searchStockXCatalog, getProductStyleId } from "./scrapers/sources/stockx.js";
 import { searchGoatBySku } from "./scrapers/sources/goat.js";
 import { searchKickscrewBySku } from "./scrapers/sources/kickscrew.js";
+import { searchFlightClubBySku } from "./scrapers/sources/flight-club.js";
 
 dotenv.config();
 
@@ -90,7 +91,7 @@ app.get("/api/product/style", async (req, res) => {
 });
 
 /**
- * Search GOAT + KicksCrew by SKU and get all size prices
+ * Search GOAT + KicksCrew + FlightClub by SKU and get all size prices
  */
 app.get("/api/goat/prices", async (req, res) => {
     const sku = req.query.sku as string;
@@ -104,10 +105,11 @@ app.get("/api/goat/prices", async (req, res) => {
     try {
         console.log(`[API] Fetching prices for SKU: ${sku}`);
 
-        // Fetch from both sources in parallel
-        const [goatResult, kickscrewResult] = await Promise.all([
+        // Fetch from all sources in parallel
+        const [goatResult, kickscrewResult, flightClubResult] = await Promise.all([
             searchGoatBySku(sku),
             searchKickscrewBySku(sku),
+            searchFlightClubBySku(sku),
         ]);
 
         const duration = Date.now() - startTime;
@@ -142,12 +144,27 @@ app.get("/api/goat/prices", async (req, res) => {
             console.log(`[API] KicksCrew: No sizes found`);
         }
 
+        // Print FlightClub sizes to console
+        if (flightClubResult && flightClubResult.sizes.length > 0) {
+            console.log(`[API] FlightClub found ${flightClubResult.sizes.length} sizes`);
+            console.log("\n=================================");
+            console.log(`FLIGHTCLUB PRICES`);
+            console.log("=================================");
+            flightClubResult.sizes.forEach((s) => {
+                console.log(`  Size ${s.size}: CA$${s.priceCAD}`);
+            });
+            console.log("=================================\n");
+        } else {
+            console.log(`[API] FlightClub: No sizes found`);
+        }
+
         console.log(`[API] Total time: ${duration}ms`);
 
         res.json({
             sku,
             goat: goatResult,
             kickscrew: kickscrewResult,
+            flightclub: flightClubResult,
             meta: {
                 duration,
                 timestamp: new Date().toISOString(),
@@ -216,7 +233,7 @@ app.get("/api/kickscrew/prices", async (req, res) => {
 });
 
 /**
- * Get prices from all sources (GOAT + KicksCrew) by SKU
+ * Get prices from all sources (GOAT + KicksCrew + FlightClub) by SKU
  */
 app.get("/api/prices", async (req, res) => {
     const sku = req.query.sku as string;
@@ -230,10 +247,11 @@ app.get("/api/prices", async (req, res) => {
     try {
         console.log(`[API] Fetching prices from all sources for SKU: ${sku}`);
 
-        // Fetch from both sources in parallel
-        const [goatResult, kickscrewResult] = await Promise.all([
+        // Fetch from all sources in parallel
+        const [goatResult, kickscrewResult, flightClubResult] = await Promise.all([
             searchGoatBySku(sku),
             searchKickscrewBySku(sku),
+            searchFlightClubBySku(sku),
         ]);
 
         const duration = Date.now() - startTime;
@@ -257,12 +275,23 @@ app.get("/api/prices", async (req, res) => {
                 console.log(`  Size ${s.size}: CA$${s.priceCAD}`);
             });
         }
+
+        // Print FlightClub sizes to console
+        if (flightClubResult && flightClubResult.sizes.length > 0) {
+            console.log("\n=================================");
+            console.log(`FLIGHTCLUB PRICES`);
+            console.log("=================================");
+            flightClubResult.sizes.forEach((s) => {
+                console.log(`  Size ${s.size}: CA$${s.priceCAD}`);
+            });
+        }
         console.log("=================================\n");
 
         res.json({
             sku,
             goat: goatResult,
             kickscrew: kickscrewResult,
+            flightclub: flightClubResult,
             meta: {
                 duration,
                 timestamp: new Date().toISOString(),
