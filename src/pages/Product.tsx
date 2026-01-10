@@ -65,35 +65,42 @@ export default function Product() {
   // Get style ID from StockX if we have the product
   useEffect(() => {
     async function fetchStyleId() {
-      if (!product?.stockxUrl) return;
+      if (!product?.stockxUrl) {
+        setError('No product URL available');
+        setIsLoading(false);
+        return;
+      }
       
       try {
         const response = await fetch(`/api/product/style?url=${encodeURIComponent(product.stockxUrl)}`);
         const data = await response.json();
         if (data.styleId) {
           setStyleId(data.styleId);
+        } else {
+          setError('Could not find Style ID');
+          setIsLoading(false);
         }
       } catch (err) {
         console.error('Failed to get style ID:', err);
-        // Use sku from URL as fallback
-        setStyleId(sku || null);
+        setError('Failed to get product Style ID');
+        setIsLoading(false);
       }
     }
     
     fetchStyleId();
-  }, [product?.stockxUrl, sku]);
+  }, [product?.stockxUrl]);
 
-  // Fetch prices when we have a style ID
+  // Fetch prices ONLY when we have a valid style ID
   useEffect(() => {
     async function fetchPrices() {
-      const searchSku = styleId || sku;
-      if (!searchSku) return;
+      // Only fetch if we have a real style ID
+      if (!styleId) return;
 
       setIsLoading(true);
       setError(null);
 
       try {
-        const response = await fetch(`/api/goat/prices?sku=${encodeURIComponent(searchSku)}`);
+        const response = await fetch(`/api/goat/prices?sku=${encodeURIComponent(styleId)}`);
         const data = await response.json();
         setPriceData(data);
       } catch (err) {
@@ -105,7 +112,7 @@ export default function Product() {
     }
 
     fetchPrices();
-  }, [styleId, sku]);
+  }, [styleId]);
 
   // Get all unique sizes across all sources
   const getAllSizes = (): string[] => {
