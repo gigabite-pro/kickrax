@@ -1,6 +1,6 @@
 import { SOURCES, SneakerListing, SourcePricing, SizePrice } from "../../types.js";
 import { ScraperResult, generateListingId } from "../types.js";
-import { launchBrowser, createPage } from "../browser.js";
+import { launchBrowser, createPage, AbortSignal, checkAbort, sleepWithAbort } from "../browser.js";
 
 export interface FlightClubSizePricing {
     productName: string;
@@ -20,27 +20,33 @@ interface FlightClubVariant {
 /**
  * Search Flight Club by SKU and get all size prices
  */
-export async function searchFlightClubBySku(sku: string): Promise<SourcePricing> {
+export async function searchFlightClubBySku(sku: string, signal?: AbortSignal): Promise<SourcePricing> {
     const source = SOURCES["flight-club"];
     console.log(`[FLIGHTCLUB] Searching for SKU: ${sku}`);
 
     const browser = await launchBrowser();
 
     try {
+        checkAbort(signal, 'FLIGHTCLUB');
         const page = await createPage(browser);
 
         // Step 1: Search Flight Club
         const searchUrl = `https://www.flightclub.com/catalogsearch/result?query=${encodeURIComponent(sku)}`;
 
         try {
+            checkAbort(signal, 'FLIGHTCLUB');
             await page.goto(searchUrl, { waitUntil: "networkidle2", timeout: 20000 });
-        } catch (e) {}
+        } catch (e) {
+            if (e instanceof Error && e.message === 'ABORTED') throw e;
+        }
 
         // Wait for product grid
         try {
+            checkAbort(signal, 'FLIGHTCLUB');
             await page.waitForSelector('a[data-qa="ProductItemsUrl"]', { timeout: 5000 });
         } catch (e) {
-            await new Promise((resolve) => setTimeout(resolve, 2000));
+            if (e instanceof Error && e.message === 'ABORTED') throw e;
+            await sleepWithAbort(2000, signal, 'FLIGHTCLUB');
         }
         
         const productData = await page.evaluate(() => {
@@ -66,10 +72,13 @@ export async function searchFlightClubBySku(sku: string): Promise<SourcePricing>
 
         // Step 2: Navigate to product page
         try {
+            checkAbort(signal, 'FLIGHTCLUB');
             await page.goto(productUrl, { waitUntil: "domcontentloaded", timeout: 20000 });
-        } catch (e) {}
+        } catch (e) {
+            if (e instanceof Error && e.message === 'ABORTED') throw e;
+        }
 
-        await new Promise((resolve) => setTimeout(resolve, 1500));
+        await sleepWithAbort(1500, signal, 'FLIGHTCLUB');
 
         // Step 3: Call API from browser
         const apiUrl = `https://www.flightclub.com/web-api/v1/product_variants?countryCode=CA&productTemplateId=${productTemplateId}&currency=CAD`;
@@ -136,7 +145,11 @@ export async function searchFlightClubBySku(sku: string): Promise<SourcePricing>
 
         return { source, sizes, lowestPrice, available: sizes.length > 0 };
     } catch (error) {
-        console.error("[FLIGHTCLUB] Error:", error);
+        if (error instanceof Error && error.message === 'ABORTED') {
+            console.log('[FLIGHTCLUB] Scraping aborted, closing browser');
+        } else {
+            console.error("[FLIGHTCLUB] Error:", error);
+        }
         await browser.close();
         return { source, sizes: [], lowestPrice: 0, available: false };
     }

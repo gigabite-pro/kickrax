@@ -1,6 +1,6 @@
 import { SOURCES, SneakerListing, SourcePricing, SizePrice } from "../../types.js";
 import { ScraperResult, generateListingId } from "../types.js";
-import { launchBrowser, createPage } from "../browser.js";
+import { launchBrowser, createPage, AbortSignal, checkAbort, sleepWithAbort } from "../browser.js";
 
 export interface StadiumGoodsSizePricing {
     productName: string;
@@ -12,27 +12,33 @@ export interface StadiumGoodsSizePricing {
 /**
  * Search Stadium Goods by SKU and get all size prices
  */
-export async function searchStadiumGoodsBySku(sku: string): Promise<SourcePricing> {
+export async function searchStadiumGoodsBySku(sku: string, signal?: AbortSignal): Promise<SourcePricing> {
     const source = SOURCES["stadium-goods"];
     console.log(`[STADIUMGOODS] Searching for SKU: ${sku}`);
 
     const browser = await launchBrowser();
 
     try {
+        checkAbort(signal, 'STADIUMGOODS');
         const page = await createPage(browser);
 
         // Step 1: Search Stadium Goods
         const searchUrl = `https://www.stadiumgoods.com/search?q=${encodeURIComponent(sku)}`;
 
         try {
+            checkAbort(signal, 'STADIUMGOODS');
             await page.goto(searchUrl, { waitUntil: "networkidle2", timeout: 20000 });
-        } catch (e) {}
+        } catch (e) {
+            if (e instanceof Error && e.message === 'ABORTED') throw e;
+        }
 
         // Wait for product grid
         try {
+            checkAbort(signal, 'STADIUMGOODS');
             await page.waitForSelector('a.tvg_grid_item_VkuMWq_item_link', { timeout: 5000 });
         } catch (e) {
-            await new Promise((resolve) => setTimeout(resolve, 2000));
+            if (e instanceof Error && e.message === 'ABORTED') throw e;
+            await sleepWithAbort(2000, signal, 'STADIUMGOODS');
         }
 
         // Find product link
@@ -66,8 +72,11 @@ export async function searchStadiumGoodsBySku(sku: string): Promise<SourcePricin
 
         // Step 2: Navigate to product page
         try {
+            checkAbort(signal, 'STADIUMGOODS');
             await page.goto(productUrl, { waitUntil: "networkidle2", timeout: 20000 });
-        } catch (e) {}
+        } catch (e) {
+            if (e instanceof Error && e.message === 'ABORTED') throw e;
+        }
 
         // Wait for size list
         try {
@@ -134,7 +143,11 @@ export async function searchStadiumGoodsBySku(sku: string): Promise<SourcePricin
 
         return { source, sizes, lowestPrice, available: sizes.length > 0 };
     } catch (error) {
-        console.error("[STADIUMGOODS] Error:", error);
+        if (error instanceof Error && error.message === 'ABORTED') {
+            console.log('[STADIUMGOODS] Scraping aborted, closing browser');
+        } else {
+            console.error("[STADIUMGOODS] Error:", error);
+        }
         await browser.close();
         return { source, sizes: [], lowestPrice: 0, available: false };
     }

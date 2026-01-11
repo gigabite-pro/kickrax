@@ -1,7 +1,7 @@
 import * as cheerio from "cheerio";
 import { SOURCES, SneakerListing, SourcePricing, SizePrice } from "../../types.js";
 import { ScraperResult, convertToCAD, generateListingId, USD_TO_CAD_RATE } from "../types.js";
-import { launchBrowser, createPage } from "../browser.js";
+import { launchBrowser, createPage, AbortSignal, checkAbort, sleepWithAbort } from "../browser.js";
 
 export interface GoatSizePricing {
     productName: string;
@@ -13,12 +13,13 @@ export interface GoatSizePricing {
 /**
  * Search GOAT by SKU and get all size prices from the first result
  */
-export async function searchGoatBySku(sku: string): Promise<GoatSizePricing | null> {
+export async function searchGoatBySku(sku: string, signal?: AbortSignal): Promise<GoatSizePricing | null> {
     console.log(`[GOAT] Searching for SKU: ${sku}`);
 
     const browser = await launchBrowser();
 
     try {
+        checkAbort(signal, 'GOAT');
         const page = await createPage(browser);
 
         await page.setExtraHTTPHeaders({
@@ -29,8 +30,9 @@ export async function searchGoatBySku(sku: string): Promise<GoatSizePricing | nu
         // Step 1: Search GOAT
         const searchUrl = `https://www.goat.com/en-ca/search?query=${encodeURIComponent(sku)}&pageNumber=1`;
 
+        checkAbort(signal, 'GOAT');
         await page.goto(searchUrl, { waitUntil: "networkidle2", timeout: 30000 });
-        await new Promise((resolve) => setTimeout(resolve, 2000));
+        await sleepWithAbort(2000, signal, 'GOAT');
 
         // Step 2: Find product link
         const skuLower = sku.toLowerCase().replace(/-/g, "");
@@ -74,29 +76,35 @@ export async function searchGoatBySku(sku: string): Promise<GoatSizePricing | nu
         console.log(`[GOAT] Found: ${productUrl}`);
 
         // Step 3: Navigate to product page
+        checkAbort(signal, 'GOAT');
         await page.goto(productUrl, { waitUntil: "networkidle2", timeout: 30000 });
-        await new Promise((resolve) => setTimeout(resolve, 2000));
+        await sleepWithAbort(2000, signal, 'GOAT');
 
         // Scroll to trigger lazy loading
         for (let i = 0; i < 3; i++) {
+            checkAbort(signal, 'GOAT');
             await page.evaluate((scrollAmount) => window.scrollBy(0, scrollAmount), 300);
-            await new Promise((resolve) => setTimeout(resolve, 300));
+            await sleepWithAbort(300, signal, 'GOAT');
         }
 
+        checkAbort(signal, 'GOAT');
         await page.evaluate(() => {
             const buyBar = document.querySelector('[data-qa="buy_bar_desktop"]');
             if (buyBar) buyBar.scrollIntoView({ behavior: "instant", block: "center" });
         });
-        await new Promise((resolve) => setTimeout(resolve, 1500));
+        await sleepWithAbort(1500, signal, 'GOAT');
 
         // Try clicking swiper
         try {
+            checkAbort(signal, 'GOAT');
             const swiperWrapper = await page.$('[data-qa="buy_bar_desktop"] .swiper-wrapper');
             if (swiperWrapper) {
                 await swiperWrapper.click();
-                await new Promise((resolve) => setTimeout(resolve, 1000));
+                await sleepWithAbort(1000, signal, 'GOAT');
             }
-        } catch (e) {}
+        } catch (e) {
+            if (e instanceof Error && e.message === 'ABORTED') throw e;
+        }
 
         // Wait for size items
         try {
@@ -161,7 +169,11 @@ export async function searchGoatBySku(sku: string): Promise<GoatSizePricing | nu
             sizes,
         };
     } catch (error) {
-        console.error("[GOAT] Error:", error);
+        if (error instanceof Error && error.message === 'ABORTED') {
+            console.log('[GOAT] Scraping aborted, closing browser');
+        } else {
+            console.error("[GOAT] Error:", error);
+        }
         return null;
     } finally {
         await browser.close();

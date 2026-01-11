@@ -1,6 +1,6 @@
 import { SOURCES, SneakerListing, SourcePricing, SizePrice } from "../../types.js";
 import { ScraperResult, generateListingId, USD_TO_CAD_RATE } from "../types.js";
-import { launchBrowser, createPage } from "../browser.js";
+import { launchBrowser, createPage, AbortSignal, checkAbort, sleepWithAbort } from "../browser.js";
 
 export interface KickscrewSizePricing {
     productName: string;
@@ -12,24 +12,27 @@ export interface KickscrewSizePricing {
 /**
  * Search KicksCrew by SKU and get all size prices from the first result
  */
-export async function searchKickscrewBySku(sku: string): Promise<KickscrewSizePricing | null> {
+export async function searchKickscrewBySku(sku: string, signal?: AbortSignal): Promise<KickscrewSizePricing | null> {
     console.log(`[KICKSCREW] Searching for SKU: ${sku}`);
     
     const browser = await launchBrowser();
 
     try {
+        checkAbort(signal, 'KICKSCREW');
         const page = await createPage(browser);
 
         // Step 1: Search KicksCrew
         const searchUrl = `https://www.kickscrew.com/en-CA/search?q=${encodeURIComponent(sku)}`;
         
         try {
+            checkAbort(signal, 'KICKSCREW');
             await page.goto(searchUrl, { waitUntil: "domcontentloaded", timeout: 20000 });
         } catch (e) {
+            if (e instanceof Error && e.message === 'ABORTED') throw e;
             // Continue even if timeout
         }
         
-        await new Promise((resolve) => setTimeout(resolve, 2000));
+        await sleepWithAbort(2000, signal, 'KICKSCREW');
 
         // Wait for product grid
         try {
@@ -70,13 +73,15 @@ export async function searchKickscrewBySku(sku: string): Promise<KickscrewSizePr
 
         // Step 2: Navigate to product page
         try {
+            checkAbort(signal, 'KICKSCREW');
             await page.goto(productUrl, { waitUntil: "networkidle0", timeout: 30000 });
         } catch (e) {
+            if (e instanceof Error && e.message === 'ABORTED') throw e;
             // Continue even if timeout
         }
         
         // Wait for page to fully render
-        await new Promise((resolve) => setTimeout(resolve, 4000));
+        await sleepWithAbort(4000, signal, 'KICKSCREW');
 
         // Get product name
         const productName = await page.evaluate(() => {
@@ -137,7 +142,7 @@ export async function searchKickscrewBySku(sku: string): Promise<KickscrewSizePr
         }
 
         // Wait for dropdown to appear
-        await new Promise((resolve) => setTimeout(resolve, 2000));
+        await sleepWithAbort(2000, signal, 'KICKSCREW');
 
         // Wait for size options
         try {
@@ -224,7 +229,11 @@ export async function searchKickscrewBySku(sku: string): Promise<KickscrewSizePr
             sizes,
         };
     } catch (error) {
-        console.error("[KICKSCREW] Error:", error);
+        if (error instanceof Error && error.message === 'ABORTED') {
+            console.log('[KICKSCREW] Scraping aborted, closing browser');
+        } else {
+            console.error("[KICKSCREW] Error:", error);
+        }
         return null;
     } finally {
         await browser.close();

@@ -21,7 +21,7 @@ app.get("/api/health", (req, res) => {
 });
 
 /**
- * Search API - Returns StockX results only
+ * Search API - Returns StockX results only (max 50 products)
  */
 app.get("/api/search", async (req, res) => {
     const query = req.query.q as string;
@@ -36,7 +36,7 @@ app.get("/api/search", async (req, res) => {
     try {
         console.log(`[API] Searching StockX for: ${normalizedQuery}`);
 
-        // Get products from StockX only
+        // Get products from StockX (max 50)
         const products = await searchStockXCatalog(normalizedQuery);
         const duration = Date.now() - startTime;
 
@@ -47,8 +47,6 @@ app.get("/api/search", async (req, res) => {
             products,
             meta: {
                 total: products.length,
-                source: "StockX",
-                duration,
                 timestamp: new Date().toISOString(),
             },
         });
@@ -56,6 +54,37 @@ app.get("/api/search", async (req, res) => {
         console.error("Search API error:", error);
         res.status(500).json({
             error: "Failed to search",
+            message: error instanceof Error ? error.message : "Unknown error",
+        });
+    }
+});
+
+/**
+ * Trending API - Returns most active sneakers from StockX
+ */
+app.get("/api/trending", async (req, res) => {
+    const startTime = Date.now();
+
+    try {
+        console.log(`[API] Fetching trending sneakers`);
+
+        // Get trending products (most-active sort)
+        const products = await searchStockXCatalog(undefined, 'most-active');
+        const duration = Date.now() - startTime;
+
+        console.log(`[API] Found ${products.length} trending products in ${duration}ms`);
+
+        res.json({
+            products,
+            meta: {
+                total: products.length,
+                timestamp: new Date().toISOString(),
+            },
+        });
+    } catch (error) {
+        console.error("Trending API error:", error);
+        res.status(500).json({
+            error: "Failed to fetch trending",
             message: error instanceof Error ? error.message : "Unknown error",
         });
     }
@@ -71,9 +100,19 @@ app.get("/api/product/style", async (req, res) => {
         return res.status(400).json({ error: "Valid StockX URL required" });
     }
 
+    const signal = { aborted: false };
+    req.on('close', () => {
+        if (!res.writableEnded) {
+            signal.aborted = true;
+            console.log(`[API] Style ID request aborted for: ${url}`);
+        }
+    });
+
     try {
         console.log(`[API] Getting Style ID and prices from: ${url}`);
-        const productData = await getProductDataWithPrices(url);
+        const productData = await getProductDataWithPrices(url, signal);
+
+        if (signal.aborted) return;
 
         console.log(`[API] Style ID: ${productData.styleId}, Sizes: ${productData.sizes.length}`);
 
@@ -84,6 +123,7 @@ app.get("/api/product/style", async (req, res) => {
             timestamp: new Date().toISOString(),
         });
     } catch (error) {
+        if (signal.aborted) return;
         console.error("Style ID API error:", error);
         res.status(500).json({
             error: "Failed to get Style ID",
@@ -181,13 +221,22 @@ app.get("/api/prices/goat", async (req, res) => {
         return res.status(400).json({ error: "Valid SKU required" });
     }
 
+    const signal = { aborted: false };
+    req.on('close', () => {
+        if (!res.writableEnded) {
+            signal.aborted = true;
+            console.log(`[GOAT] Request aborted for SKU: ${sku}`);
+        }
+    });
+
     const startTime = Date.now();
     try {
-        const result = await searchGoatBySku(sku);
+        const result = await searchGoatBySku(sku, signal);
+        if (signal.aborted) return;
         const duration = Date.now() - startTime;
         res.json({ source: "goat", sku, data: result, duration });
     } catch (error) {
-        res.status(500).json({ source: "goat", error: "Failed to fetch" });
+        if (!signal.aborted) res.status(500).json({ source: "goat", error: "Failed to fetch" });
     }
 });
 
@@ -198,13 +247,22 @@ app.get("/api/prices/kickscrew", async (req, res) => {
         return res.status(400).json({ error: "Valid SKU required" });
     }
 
+    const signal = { aborted: false };
+    req.on('close', () => {
+        if (!res.writableEnded) {
+            signal.aborted = true;
+            console.log(`[KICKSCREW] Request aborted for SKU: ${sku}`);
+        }
+    });
+
     const startTime = Date.now();
     try {
-        const result = await searchKickscrewBySku(sku);
+        const result = await searchKickscrewBySku(sku, signal);
+        if (signal.aborted) return;
         const duration = Date.now() - startTime;
         res.json({ source: "kickscrew", sku, data: result, duration });
     } catch (error) {
-        res.status(500).json({ source: "kickscrew", error: "Failed to fetch" });
+        if (!signal.aborted) res.status(500).json({ source: "kickscrew", error: "Failed to fetch" });
     }
 });
 
@@ -215,13 +273,22 @@ app.get("/api/prices/flightclub", async (req, res) => {
         return res.status(400).json({ error: "Valid SKU required" });
     }
 
+    const signal = { aborted: false };
+    req.on('close', () => {
+        if (!res.writableEnded) {
+            signal.aborted = true;
+            console.log(`[FLIGHTCLUB] Request aborted for SKU: ${sku}`);
+        }
+    });
+
     const startTime = Date.now();
     try {
-        const result = await searchFlightClubBySku(sku);
+        const result = await searchFlightClubBySku(sku, signal);
+        if (signal.aborted) return;
         const duration = Date.now() - startTime;
         res.json({ source: "flightclub", sku, data: result, duration });
     } catch (error) {
-        res.status(500).json({ source: "flightclub", error: "Failed to fetch" });
+        if (!signal.aborted) res.status(500).json({ source: "flightclub", error: "Failed to fetch" });
     }
 });
 
@@ -232,13 +299,22 @@ app.get("/api/prices/stadiumgoods", async (req, res) => {
         return res.status(400).json({ error: "Valid SKU required" });
     }
 
+    const signal = { aborted: false };
+    req.on('close', () => {
+        if (!res.writableEnded) {
+            signal.aborted = true;
+            console.log(`[STADIUMGOODS] Request aborted for SKU: ${sku}`);
+        }
+    });
+
     const startTime = Date.now();
     try {
-        const result = await searchStadiumGoodsBySku(sku);
+        const result = await searchStadiumGoodsBySku(sku, signal);
+        if (signal.aborted) return;
         const duration = Date.now() - startTime;
         res.json({ source: "stadiumgoods", sku, data: result, duration });
     } catch (error) {
-        res.status(500).json({ source: "stadiumgoods", error: "Failed to fetch" });
+        if (!signal.aborted) res.status(500).json({ source: "stadiumgoods", error: "Failed to fetch" });
     }
 });
 
@@ -249,9 +325,18 @@ app.get("/api/prices/stockx", async (req, res) => {
         return res.status(400).json({ error: "Valid StockX URL required" });
     }
 
+    const signal = { aborted: false };
+    req.on('close', () => {
+        if (!res.writableEnded) {
+            signal.aborted = true;
+            console.log(`[STOCKX] Request aborted for URL: ${url}`);
+        }
+    });
+
     const startTime = Date.now();
     try {
-        const result = await getProductDataWithPrices(url);
+        const result = await getProductDataWithPrices(url, signal);
+        if (signal.aborted) return;
         const duration = Date.now() - startTime;
         res.json({ 
             source: "stockx", 
@@ -264,7 +349,7 @@ app.get("/api/prices/stockx", async (req, res) => {
             duration 
         });
     } catch (error) {
-        res.status(500).json({ source: "stockx", error: "Failed to fetch" });
+        if (!signal.aborted) res.status(500).json({ source: "stockx", error: "Failed to fetch" });
     }
 });
 

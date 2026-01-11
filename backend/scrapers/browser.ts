@@ -1,6 +1,13 @@
 import puppeteer, { Browser, Page } from "puppeteer";
 
 /**
+ * Abort signal interface for cancelling scraping
+ */
+export interface AbortSignal {
+    aborted: boolean;
+}
+
+/**
  * Get Puppeteer launch options that work for both local and Docker environments
  */
 export function getPuppeteerOptions() {
@@ -43,5 +50,31 @@ export async function createPage(browser: Browser): Promise<Page> {
     );
     
     return page;
+}
+
+/**
+ * Check if aborted and throw if so
+ */
+export function checkAbort(signal?: AbortSignal, source?: string): void {
+    if (signal?.aborted) {
+        console.log(`[${source || 'SCRAPER'}] Aborted by user`);
+        throw new Error('ABORTED');
+    }
+}
+
+/**
+ * Sleep with abort check
+ */
+export async function sleepWithAbort(ms: number, signal?: AbortSignal, source?: string): Promise<void> {
+    const checkInterval = 100; // Check every 100ms
+    const iterations = Math.ceil(ms / checkInterval);
+    
+    for (let i = 0; i < iterations; i++) {
+        if (signal?.aborted) {
+            console.log(`[${source || 'SCRAPER'}] Aborted during sleep`);
+            throw new Error('ABORTED');
+        }
+        await new Promise(resolve => setTimeout(resolve, Math.min(checkInterval, ms - i * checkInterval)));
+    }
 }
 

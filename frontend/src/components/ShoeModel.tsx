@@ -1,6 +1,6 @@
 import { useRef, Suspense, useEffect } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
-import { useGLTF, Environment } from "@react-three/drei";
+import { useGLTF, Environment, ContactShadows } from "@react-three/drei";
 import * as THREE from "three";
 
 interface ShoeProps {
@@ -28,11 +28,12 @@ function Shoe({ mousePosition }: ShoeProps) {
     useFrame(() => {
         if (meshRef.current) {
             // Calculate target rotation (opposite to mouse movement)
-            targetRotation.current.x = -mousePosition.y * 0.3;
+            // Reduced x-rotation to prevent clipping through shadow
+            targetRotation.current.x = -mousePosition.y * 0.15;
             targetRotation.current.y = -mousePosition.x * 0.5;
 
             // Smooth interpolation
-            meshRef.current.rotation.x = THREE.MathUtils.lerp(meshRef.current.rotation.x, targetRotation.current.x + 0.2, 0.05);
+            meshRef.current.rotation.x = THREE.MathUtils.lerp(meshRef.current.rotation.x, targetRotation.current.x + 0.1, 0.05);
             meshRef.current.rotation.y = THREE.MathUtils.lerp(meshRef.current.rotation.y, targetRotation.current.y - 1.0, 0.05);
         }
     });
@@ -74,6 +75,7 @@ export default function ShoeModel({ mousePosition }: ShoeModelProps) {
 
                 <Suspense fallback={null}>
                     <Shoe mousePosition={mousePosition} />
+                    <ContactShadows position={[0, -0.9, 0]} opacity={0.4} scale={8} blur={2} far={2} color="#1b1717" />
                     <Environment preset="city" />
                 </Suspense>
             </Canvas>

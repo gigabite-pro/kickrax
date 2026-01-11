@@ -2,7 +2,7 @@ import puppeteer, { Browser, Page } from "puppeteer";
 import * as cheerio from "cheerio";
 import { SOURCES, SneakerListing, CatalogProduct } from "../../types.js";
 import { ScraperResult, generateListingId } from "../types.js";
-import { launchBrowser, createPage, getPuppeteerOptions } from "../browser.js";
+import { launchBrowser, createPage, getPuppeteerOptions, AbortSignal, checkAbort, sleepWithAbort } from "../browser.js";
 
 // Keep browser instance alive for performance
 let browser: Browser | null = null;
@@ -35,24 +35,16 @@ function generateStockXImageUrl(slug: string): string {
 
 /**
  * Extract image URL from DOM, or generate it
- * Prioritizes actual DOM URLs to avoid 404s
+ * Prioritizes highest quality images (3x from srcset)
  */
 function getImageUrl($tile: cheerio.Cheerio<cheerio.AnyNode>, slug: string): string {
-    // First, try to get actual image from DOM (if lazy loaded)
     const $img = $tile.find("img").first();
 
-    // Priority 1: Try src attribute (most reliable, already loaded)
-    const src = $img.attr("src") || "";
-    if (src && src.includes("images.stockx.com")) {
-        // Decode HTML entities and return
-        return src.replace(/&amp;/g, "&").replace(/&quot;/g, '"');
-    }
-
-    // Priority 2: Try srcset - extract 3x version (highest quality)
+    // Priority 1: Try srcset - extract 3x version (highest quality)
     const srcset = $img.attr("srcset") || "";
     if (srcset) {
-        // Try 3x first (best quality)
         const srcsetLines = srcset.split(",");
+        // Try 3x first (best quality)
         for (const line of srcsetLines) {
             if (line.includes("3x")) {
                 const urlMatch = line.match(/(https:\/\/images\.stockx\.com\/[^\s]+)/);
@@ -70,33 +62,46 @@ function getImageUrl($tile: cheerio.Cheerio<cheerio.AnyNode>, slug: string): str
                 }
             }
         }
-        // Fallback: extract first URL from srcset
-        const srcsetMatch = srcset.match(/(https:\/\/images\.stockx\.com\/[^\s]+)/);
-        if (srcsetMatch) {
-            return srcsetMatch[1].replace(/&amp;/g, "&").replace(/&quot;/g, '"');
-        }
+    }
+
+    // Priority 2: Try src attribute and upgrade quality params
+    const src = $img.attr("src") || "";
+    if (src && src.includes("images.stockx.com")) {
+        // Upgrade quality: increase dpr to 3 and quality to 80
+        let upgradedUrl = src.replace(/&amp;/g, "&").replace(/&quot;/g, '"');
+        upgradedUrl = upgradedUrl.replace(/dpr=\d/, "dpr=3").replace(/q=\d+/, "q=80");
+        return upgradedUrl;
     }
 
     // Priority 3: Try data-src (lazy loading)
     const dataSrc = $img.attr("data-src") || $img.attr("data-lazy-src") || "";
     if (dataSrc && dataSrc.includes("images.stockx.com")) {
-        return dataSrc.replace(/&amp;/g, "&").replace(/&quot;/g, '"');
+        let upgradedUrl = dataSrc.replace(/&amp;/g, "&").replace(/&quot;/g, '"');
+        upgradedUrl = upgradedUrl.replace(/dpr=\d/, "dpr=3").replace(/q=\d+/, "q=80");
+        return upgradedUrl;
     }
 
-    // Fallback: Generate URL from slug using the 360 view pattern
+    // Fallback: Generate URL from slug using the 360 view pattern (already high quality)
     return generateStockXImageUrl(slug);
 }
 
 /**
  * Search StockX by scraping the HTML search results page using Puppeteer
  * URL: https://stockx.com/search?s=jordan+1
+ * @param query - Search query (optional for trending)
+ * @param sort - Sort option (e.g., 'most-active' for trending)
  */
-export async function searchStockXCatalog(query: string): Promise<CatalogProduct[]> {
+export async function searchStockXCatalog(query?: string, sort?: string): Promise<CatalogProduct[]> {
     let page: Page | null = null;
+    const targetCount = 50; // Fixed limit of 50 products
 
     try {
-        const searchUrl = `https://stockx.com/search?s=${encodeURIComponent(query)}`;
-        console.log(`[StockX] Scraping with Puppeteer: ${searchUrl}`);
+        // Build URL with optional query and sort
+        let searchUrl = 'https://stockx.com/search?category=sneakers';
+        if (query) searchUrl += `&s=${encodeURIComponent(query)}`;
+        if (sort) searchUrl += `&sort=${encodeURIComponent(sort)}`;
+        
+        console.log(`[StockX] Scraping with Puppeteer: ${searchUrl} (target: ${targetCount} products)`);
 
         const browserInstance = await getBrowser();
         page = await browserInstance.newPage();
@@ -121,17 +126,28 @@ export async function searchStockXCatalog(query: string): Promise<CatalogProduct
             await new Promise((resolve) => setTimeout(resolve, 2000));
         }
 
-        // Scroll down to trigger lazy loading of images
+        // Scroll multiple times to trigger lazy loading of more products
+        const scrollIterations = 5;
+        console.log(`[StockX] Scrolling ${scrollIterations} times to load products...`);
+        
+        for (let i = 0; i < scrollIterations; i++) {
+            await page.evaluate((scrollIndex) => {
+                window.scrollTo(0, (scrollIndex + 1) * window.innerHeight);
+            }, i);
+            await new Promise((resolve) => setTimeout(resolve, 800));
+        }
+        
+        // Final scroll to bottom
         await page.evaluate(() => {
-            window.scrollTo(0, document.body.scrollHeight / 2);
+            window.scrollTo(0, document.body.scrollHeight);
         });
-        await new Promise((resolve) => setTimeout(resolve, 1500));
+        await new Promise((resolve) => setTimeout(resolve, 1000));
 
-        // Scroll back up to ensure all images in viewport are loaded
+        // Scroll back up to ensure all images are loaded
         await page.evaluate(() => {
             window.scrollTo(0, 0);
         });
-        await new Promise((resolve) => setTimeout(resolve, 500));
+        await new Promise((resolve) => setTimeout(resolve, 300));
 
         // Get the rendered HTML
         const html = await page.content();
@@ -142,7 +158,7 @@ export async function searchStockXCatalog(query: string): Promise<CatalogProduct
 
         // Extract products using exact selectors from DOM
         $('[data-testid="ProductTile"]').each((index, element) => {
-            if (products.length >= 20) return false; // Stop at 20
+            if (products.length >= targetCount) return false; // Stop at target
 
             try {
                 const $tile = $(element);
@@ -210,7 +226,7 @@ export async function searchStockXCatalog(query: string): Promise<CatalogProduct
 
             // Look for any product links in the results container
             $('#product-results a[href^="/"], [data-component="brand-tile"] a[href^="/"]').each((index, element) => {
-                if (products.length >= 20) return false;
+                if (products.length >= targetCount) return false;
 
                 try {
                     const $link = $(element);
@@ -365,19 +381,22 @@ export async function getProductStyleId(productUrl: string): Promise<string | nu
  * Get Style ID AND prices from a StockX product page
  * Scrapes both the Style value and all size prices
  */
-export async function getProductDataWithPrices(productUrl: string): Promise<StockXProductData> {
+export async function getProductDataWithPrices(productUrl: string, signal?: AbortSignal): Promise<StockXProductData> {
     const browser = await launchBrowser();
 
     try {
+        checkAbort(signal, 'STOCKX');
         const page = await createPage(browser);
 
         console.log(`[StockX] Loading product page: ${productUrl}`);
 
+        checkAbort(signal, 'STOCKX');
         await page.goto(productUrl, {
             waitUntil: "networkidle2",
             timeout: 30000,
         });
 
+        checkAbort(signal, 'STOCKX');
         // Wait for the product traits section to load
         await page
             .waitForSelector('[data-component="ProductTraits"], [data-testid="product-traits"]', {
@@ -387,19 +406,23 @@ export async function getProductDataWithPrices(productUrl: string): Promise<Stoc
 
         // Click on size selector to open the dropdown
         try {
+            checkAbort(signal, 'STOCKX');
             const sizeButton = await page.$('[data-testid="pdp-size-selector"], [data-testid="size-selector-button"], button[aria-haspopup="menu"]');
             if (sizeButton) {
                 await sizeButton.click();
-                await new Promise(resolve => setTimeout(resolve, 1000));
+                await sleepWithAbort(1000, signal, 'STOCKX');
             }
         } catch (e) {
+            if (e instanceof Error && e.message === 'ABORTED') throw e;
             console.log("[StockX] Could not click size selector");
         }
 
         // Wait for sizes to load
         try {
+            checkAbort(signal, 'STOCKX');
             await page.waitForSelector('[data-testid="sizes-wrapper"], [data-testid="size-selector-button"]', { timeout: 5000 });
         } catch (e) {
+            if (e instanceof Error && e.message === 'ABORTED') throw e;
             console.log("[StockX] Size wrapper not found");
         }
 
@@ -479,8 +502,53 @@ export async function getProductDataWithPrices(productUrl: string): Promise<Stoc
         // Get product name
         const productName = $('h1').first().text().trim() || 'Unknown Product';
         
-        // Get image
-        const imageUrl = $('img[alt*="product"], img[data-testid="product-image"]').first().attr('src') || '';
+        // Get HD image from the 360 view component
+        let imageUrl = '';
+        
+        // Priority 1: Get from 360 view image (highest quality)
+        const $threeSixtyImg = $('[data-component="MediaContainer"] img[data-image-type="360"], [data-component="SingleImage"] img');
+        if ($threeSixtyImg.length) {
+            // Try to get 3x version from srcset (highest quality)
+            const srcset = $threeSixtyImg.attr('srcset') || '';
+            if (srcset) {
+                const srcsetLines = srcset.split(',');
+                // Look for 3x version first
+                for (const line of srcsetLines) {
+                    if (line.includes('3x')) {
+                        const urlMatch = line.match(/(https:\/\/images\.stockx\.com\/[^\s]+)/);
+                        if (urlMatch) {
+                            imageUrl = urlMatch[1].replace(/&amp;/g, '&');
+                            break;
+                        }
+                    }
+                }
+                // Fall back to 2x
+                if (!imageUrl) {
+                    for (const line of srcsetLines) {
+                        if (line.includes('2x')) {
+                            const urlMatch = line.match(/(https:\/\/images\.stockx\.com\/[^\s]+)/);
+                            if (urlMatch) {
+                                imageUrl = urlMatch[1].replace(/&amp;/g, '&');
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+            // Fall back to src attribute
+            if (!imageUrl) {
+                imageUrl = $threeSixtyImg.attr('src') || '';
+                imageUrl = imageUrl.replace(/&amp;/g, '&');
+            }
+        }
+        
+        // Priority 2: Try any product image
+        if (!imageUrl) {
+            const $productImg = $('img[alt*="product"], img[data-testid="product-image"]').first();
+            imageUrl = $productImg.attr('src') || '';
+        }
+        
+        console.log(`[StockX] HD Image URL: ${imageUrl.substring(0, 100)}...`);
 
         return {
             styleId,
@@ -490,7 +558,11 @@ export async function getProductDataWithPrices(productUrl: string): Promise<Stoc
             sizes,
         };
     } catch (error) {
-        console.error("[StockX] Error getting product data:", error);
+        if (error instanceof Error && error.message === 'ABORTED') {
+            console.log('[STOCKX] Scraping aborted, closing browser');
+        } else {
+            console.error("[StockX] Error getting product data:", error);
+        }
         return {
             styleId: null,
             productName: '',

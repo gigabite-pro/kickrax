@@ -1,7 +1,7 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ArrowLeft, ExternalLink, Loader2, Zap, Tag, Check } from 'lucide-react';
+import { ArrowLeft, ExternalLink, Loader2, Zap, Tag, ChevronDown, ChevronUp, Check } from 'lucide-react';
 import Header from '../components/Header';
 import { CatalogProduct } from '../types';
 
@@ -74,16 +74,71 @@ export default function Product() {
   const [styleIdLoading, setStyleIdLoading] = useState(true);
   const [styleIdError, setStyleIdError] = useState<string | null>(null);
   const [selectedSize, setSelectedSize] = useState<string | null>(null);
+  const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+  const [canScrollUp, setCanScrollUp] = useState(false);
+  const [canScrollDown, setCanScrollDown] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+
+  // Check scroll position for indicators
+  const handleScroll = useCallback(() => {
+    const container = scrollContainerRef.current;
+    if (!container) return;
+    
+    setCanScrollUp(container.scrollTop > 0);
+    setCanScrollDown(container.scrollTop < container.scrollHeight - container.clientHeight - 5);
+  }, []);
+
+  // Initialize scroll state when dropdown opens
+  useEffect(() => {
+    if (isDropdownOpen) {
+      setTimeout(handleScroll, 50);
+    }
+  }, [isDropdownOpen, handleScroll]);
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setIsDropdownOpen(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  // AbortController for canceling requests on unmount
+  const abortControllerRef = useRef<AbortController | null>(null);
+
+  // Cleanup on unmount - abort all pending requests
+  useEffect(() => {
+    return () => {
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+    };
+  }, []);
+
+  // Update page title for SEO
+  useEffect(() => {
+    if (product?.name) {
+      document.title = `${product.name} | Compare Prices | KickRax`;
+    }
+    return () => {
+      document.title = 'KickRax | Compare Sneaker Prices';
+    };
+  }, [product?.name]);
 
   // Fetch from a single source
-  const fetchFromSource = useCallback(async (source: SourceKey, searchSku: string) => {
+  const fetchFromSource = useCallback(async (source: SourceKey, searchSku: string, signal?: AbortSignal) => {
     setSourceStates(prev => ({
       ...prev,
       [source]: { loading: true, data: null, error: false }
     }));
 
     try {
-      const response = await fetch(`/api/prices/${source}?sku=${encodeURIComponent(searchSku)}`);
+      const response = await fetch(`/api/prices/${source}?sku=${encodeURIComponent(searchSku)}`, { signal });
       const result = await response.json();
       
       setSourceStates(prev => ({
@@ -95,7 +150,10 @@ export default function Product() {
           duration: result.duration 
         }
       }));
-    } catch (err) {
+    } catch (err: unknown) {
+      // Don't update state if request was aborted
+      if (err instanceof Error && err.name === 'AbortError') return;
+      
       setSourceStates(prev => ({
         ...prev,
         [source]: { loading: false, data: null, error: true }
@@ -105,6 +163,10 @@ export default function Product() {
 
   // Get style ID AND StockX prices from StockX
   useEffect(() => {
+    // Create new abort controller for this request
+    abortControllerRef.current = new AbortController();
+    const signal = abortControllerRef.current.signal;
+
     async function fetchStyleIdAndPrices() {
       if (!product?.stockxUrl) {
         setStyleIdError('No product URL available');
@@ -121,7 +183,7 @@ export default function Product() {
       const startTime = Date.now();
       
       try {
-        const response = await fetch(`/api/product/style?url=${encodeURIComponent(product.stockxUrl)}`);
+        const response = await fetch(`/api/product/style?url=${encodeURIComponent(product.stockxUrl)}`, { signal });
         const data = await response.json();
         
         if (data.styleId) {
@@ -152,7 +214,10 @@ export default function Product() {
             stockx: { loading: false, data: null, error: true }
           }));
         }
-      } catch (err) {
+      } catch (err: unknown) {
+        // Don't update state if request was aborted
+        if (err instanceof Error && err.name === 'AbortError') return;
+        
         console.error('Failed to get style ID:', err);
         setStyleIdError('Failed to get product Style ID');
         setSourceStates(prev => ({
@@ -160,21 +225,35 @@ export default function Product() {
           stockx: { loading: false, data: null, error: true }
         }));
       } finally {
-        setStyleIdLoading(false);
+        if (!signal.aborted) {
+          setStyleIdLoading(false);
+        }
       }
     }
     
     fetchStyleIdAndPrices();
+
+    return () => {
+      abortControllerRef.current?.abort();
+    };
   }, [product?.stockxUrl]);
 
   // Fetch from other sources in parallel when we have a style ID
   useEffect(() => {
     if (!styleId) return;
     
+    // Create new abort controller for these requests
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+    
     // Start fetching from SKU-based sources (StockX prices already fetched with style ID)
     SKU_SOURCES.forEach(source => {
-      fetchFromSource(source, styleId);
+      fetchFromSource(source, styleId, controller.signal);
     });
+
+    return () => {
+      controller.abort();
+    };
   }, [styleId, fetchFromSource]);
 
   // Check if any source is still loading
@@ -249,70 +328,64 @@ export default function Product() {
   const allSizes = getAllSizes();
 
   return (
-    <main className="min-h-screen pb-20 pattern-bg">
+    <main className="min-h-screen sm:h-screen sm:overflow-hidden pattern-bg">
       <Header />
       
-      <section className="pt-28 px-6">
+      <section className="min-h-[calc(100vh-56px)] sm:h-[calc(100vh-64px)] pt-16 sm:pt-20 px-4 sm:px-6 pb-8 sm:pb-0 overflow-y-auto">
         <div className="max-w-6xl mx-auto">
           {/* Back button */}
           <motion.button
             initial={{ opacity: 0, x: -20 }}
             animate={{ opacity: 1, x: 0 }}
             onClick={() => navigate(-1)}
-            className="flex items-center gap-2 text-noir/60 hover:text-noir mb-8 transition-colors"
+            className="flex items-center gap-2 text-noir/60 hover:text-noir mb-3 sm:mb-4 transition-colors text-xs sm:text-sm"
           >
-            <ArrowLeft className="w-5 h-5" />
+            <ArrowLeft className="w-3.5 sm:w-4 h-3.5 sm:h-4" />
             Back to search
           </motion.button>
 
-          <div className="grid lg:grid-cols-2 gap-12">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 sm:gap-8">
             {/* Left: Product Image & Info */}
             <motion.div
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
             >
-              <div className="bg-white rounded-3xl overflow-hidden border border-noir/5 shadow-lg">
-                <div className="aspect-square bg-cotton-dark p-8">
-                  {product?.imageUrl ? (
+              <div className="bg-white rounded-xl sm:rounded-2xl overflow-hidden border border-noir/5 shadow-lg flex flex-row sm:flex-row lg:flex-col">
+                <div className="w-1/3 sm:w-1/3 lg:w-full aspect-square lg:aspect-[4/3] bg-cotton-dark flex-shrink-0 overflow-hidden relative">
+                  {/* Use HD image from StockX if available, otherwise fall back to product image */}
+                  {(sourceStates.stockx.data?.imageUrl || product?.imageUrl) ? (
                     <img
-                      src={product.imageUrl}
-                      alt={product.name}
-                      className="w-full h-full object-contain"
+                      src={sourceStates.stockx.data?.imageUrl || product?.imageUrl}
+                      alt={product?.name || 'Product'}
+                      className="w-full h-full object-cover"
                       referrerPolicy="no-referrer"
                       crossOrigin="anonymous"
                     />
                   ) : (
                     <div className="w-full h-full flex items-center justify-center">
-                      <span className="text-9xl opacity-30">👟</span>
+                      <span className="text-7xl opacity-30">👟</span>
+                    </div>
+                  )}
+                  
+                  {/* Loading overlay while fetching HD image */}
+                  {sourceStates.stockx.loading && product?.imageUrl && (
+                    <div className="absolute inset-0 bg-cotton-dark/40 backdrop-blur-[2px] flex items-center justify-center">
+                      <Loader2 className="w-8 h-8 text-cherry animate-spin" />
                     </div>
                   )}
                 </div>
                 
-                <div className="p-6">
-                  <p className="text-cherry text-sm font-semibold mb-2 uppercase tracking-wide">
+                <div className="p-3 sm:p-5 flex-1">
+                  <p className="text-cherry text-xs sm:text-sm font-bold mb-1 sm:mb-1.5 uppercase tracking-wider">
                     {product?.brand || 'Sneaker'}
                   </p>
-                  <h1 className="text-noir font-display text-2xl md:text-3xl leading-tight mb-4">
+                  <h1 className="text-noir font-bold text-sm sm:text-lg md:text-xl leading-snug mb-2 sm:mb-4 line-clamp-2 sm:line-clamp-none">
                     {product?.name || 'Loading...'}
                   </h1>
                   
-                  <div className="flex items-center gap-3">
-                    <div className="flex items-center gap-1 bg-cotton-dark text-noir/70 text-sm font-mono px-3 py-1.5 rounded-full">
-                      <Tag className="w-4 h-4" />
-                      {styleId || sku || 'N/A'}
-                    </div>
-                    
-                    {product?.stockxUrl && (
-                      <a
-                        href={product.stockxUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="flex items-center gap-1 bg-cherry/10 text-cherry text-sm px-3 py-1.5 rounded-full hover:bg-cherry/20 transition-colors"
-                      >
-                        StockX
-                        <ExternalLink className="w-3 h-3" />
-                      </a>
-                    )}
+                  <div className="inline-flex items-center gap-1 sm:gap-1.5 bg-cotton-dark text-noir/70 text-xs sm:text-sm font-mono px-2 sm:px-3 py-1 sm:py-1.5 rounded-full w-fit">
+                    <Tag className="w-3 sm:w-4 h-3 sm:h-4" />
+                    <span className="truncate max-w-[120px] sm:max-w-none">{styleId || sku || 'N/A'}</span>
                   </div>
                 </div>
               </div>
@@ -324,124 +397,152 @@ export default function Product() {
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.1 }}
             >
-              <h2 className="text-2xl font-display mb-6 text-noir">
-                COMPARE <span className="text-cherry">PRICES</span>
+              <h2 className="text-lg sm:text-xl font-bold mb-4 sm:mb-5 text-noir uppercase tracking-wide">
+                Compare <span className="text-cherry">Prices</span>
               </h2>
 
               {styleIdLoading ? (
-                <div className="bg-white rounded-2xl p-12 flex flex-col items-center justify-center border border-noir/5 shadow-md">
-                  <Loader2 className="w-12 h-12 text-cherry animate-spin mb-4" />
-                  <p className="text-noir/60">Getting product info...</p>
+                <div className="bg-white rounded-xl sm:rounded-2xl p-6 sm:p-10 flex flex-col items-center justify-center border border-noir/5 shadow-md">
+                  <Loader2 className="w-10 sm:w-12 h-10 sm:h-12 text-cherry animate-spin mb-3 sm:mb-4" />
+                  <p className="text-noir/60 text-sm sm:text-base">Getting product info...</p>
+                  <p className="text-noir/40 text-xs sm:text-sm mt-1">This may take up to 40 seconds</p>
                 </div>
               ) : styleIdError ? (
-                <div className="bg-white rounded-2xl p-8 text-center border border-noir/5 shadow-md">
-                  <p className="text-cherry mb-4">{styleIdError}</p>
+                <div className="bg-white rounded-xl sm:rounded-2xl p-6 sm:p-8 text-center border border-noir/5 shadow-md">
+                  <p className="text-cherry mb-3 sm:mb-4 text-sm sm:text-base">{styleIdError}</p>
                   <button
                     onClick={() => window.location.reload()}
-                    className="px-4 py-2 bg-cherry text-cotton rounded-lg hover:bg-cherry-light transition-colors"
+                    className="px-3 sm:px-4 py-1.5 sm:py-2 bg-cherry text-cotton rounded-lg hover:bg-cherry-light transition-colors text-sm"
                   >
                     Try Again
                   </button>
                 </div>
               ) : (
                 <>
-                  {/* Source Status Cards - Always visible */}
-                  <div className="bg-white rounded-2xl p-6 mb-6 border border-noir/5 shadow-md">
-                    <h3 className="text-lg font-display mb-4 text-noir">FETCHING PRICES</h3>
-                    <div className="space-y-3">
-                      {SOURCES.map((source) => {
-                        const state = sourceStates[source];
-                        const config = sourceConfig[source];
-                        const sizesCount = state.data?.sizes?.length || 0;
-                        
-                        return (
-                          <motion.div 
-                            key={source} 
-                            className={`flex items-center justify-between p-4 rounded-xl transition-all ${
-                              state.loading 
-                                ? 'bg-cotton border border-noir/10' 
-                                : state.data?.sizes?.length 
-                                  ? 'bg-green-50 border border-green-200' 
-                                  : 'bg-cotton-dark/50 border border-noir/5'
-                            }`}
-                            initial={{ opacity: 0, x: -20 }}
-                            animate={{ opacity: 1, x: 0 }}
+                  {/* Size Selector Dropdown */}
+                  <div className="bg-white rounded-lg sm:rounded-xl p-3 sm:p-5 mb-4 sm:mb-5 border border-noir/5 shadow-md">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 sm:gap-0 mb-3 sm:mb-4">
+                      <p className="text-noir/60 text-xs sm:text-sm">Select your size:</p>
+                      {isAnyLoading && (
+                        <div className="flex items-center gap-1.5 sm:gap-2 text-noir/40 text-xs sm:text-sm">
+                          <Loader2 className="w-3 sm:w-4 h-3 sm:h-4 animate-spin text-cherry" />
+                          <span>Fetching prices...</span>
+                        </div>
+                      )}
+                    </div>
+                    
+                    {/* Custom Dropdown */}
+                    <div className="relative" ref={dropdownRef}>
+                      <button
+                        type="button"
+                        onClick={() => setIsDropdownOpen(!isDropdownOpen)}
+                        className={`w-full flex items-center justify-between bg-cotton border rounded-lg px-3 sm:px-4 py-2.5 sm:py-3.5 text-left transition-all ${
+                          isDropdownOpen 
+                            ? 'border-cherry ring-2 ring-cherry/20' 
+                            : 'border-noir/10 hover:border-noir/30'
+                        }`}
+                      >
+                        <span className={`font-semibold text-sm sm:text-base ${selectedSize ? 'text-noir' : 'text-noir/40'}`}>
+                          {selectedSize 
+                            ? `US ${selectedSize} — ${getBestPriceForSize(selectedSize) ? formatPrice(getBestPriceForSize(selectedSize)!.price) : ''}`
+                            : 'Choose a size'
+                          }
+                        </span>
+                        <ChevronDown className={`w-4 sm:w-5 h-4 sm:h-5 text-noir/40 transition-transform ${isDropdownOpen ? 'rotate-180' : ''}`} />
+                      </button>
+
+                      <AnimatePresence>
+                        {isDropdownOpen && (
+                          <motion.div
+                            initial={{ opacity: 0, y: -10 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            exit={{ opacity: 0, y: -10 }}
+                            transition={{ duration: 0.15 }}
+                            className="absolute z-50 w-full mt-2 bg-white border border-noir/10 rounded-xl shadow-xl overflow-hidden"
                           >
-                            <div className="flex items-center gap-3">
-                              <div className={`w-3 h-3 rounded-full ${config.color}`} />
-                              <span className="text-noir font-medium">{config.name}</span>
-                            </div>
-                            
-                            <div className="flex items-center gap-2">
-                              {state.loading ? (
-                                <>
-                                  <Loader2 className="w-4 h-4 text-cherry animate-spin" />
-                                  <span className="text-noir/40 text-sm">Fetching...</span>
-                                </>
-                              ) : state.error ? (
-                                <span className="text-cherry text-sm">Failed</span>
-                              ) : sizesCount > 0 ? (
-                                <>
-                                  <Check className="w-4 h-4 text-green-600" />
-                                  <span className="text-green-600 text-sm font-medium">
-                                    {sizesCount} sizes
-                                  </span>
-                                  {state.duration && (
-                                    <span className="text-noir/40 text-xs">
-                                      ({(state.duration / 1000).toFixed(1)}s)
-                                    </span>
-                                  )}
-                                </>
-                              ) : (
-                                <span className="text-noir/40 text-sm">No sizes found</span>
-                              )}
+                            <div className="relative">
+                              {/* Top scroll indicator */}
+                              <AnimatePresence>
+                                {canScrollUp && (
+                                  <motion.div
+                                    initial={{ opacity: 0 }}
+                                    animate={{ opacity: 1 }}
+                                    exit={{ opacity: 0 }}
+                                    className="absolute top-0 left-0 right-0 z-10 flex justify-center items-center h-10 bg-gradient-to-b from-white from-60% to-transparent pointer-events-none"
+                                  >
+                                    <ChevronUp className="w-5 h-5 text-noir/50" />
+                                  </motion.div>
+                                )}
+                              </AnimatePresence>
+
+                              <div 
+                                ref={scrollContainerRef}
+                                onScroll={handleScroll}
+                                className="max-h-64 overflow-y-auto scrollbar-hide py-1" 
+                                style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
+                              >
+                                {allSizes.length === 0 ? (
+                                  <div className="px-4 py-3 text-noir/40 text-sm text-center">
+                                    {isAnyLoading ? 'Loading sizes...' : 'No sizes available'}
+                                  </div>
+                                ) : (
+                                  allSizes.map((size, index) => {
+                                    const best = getBestPriceForSize(size);
+                                    const isSelected = selectedSize === size;
+                                    const isLast = index === allSizes.length - 1;
+                                    
+                                    return (
+                                      <button
+                                        key={size}
+                                        type="button"
+                                        onClick={() => {
+                                          setSelectedSize(size);
+                                          setIsDropdownOpen(false);
+                                        }}
+                                        className={`w-full flex items-center justify-between px-4 py-3 transition-colors ${
+                                          isSelected 
+                                            ? 'bg-cherry/10 text-cherry' 
+                                            : 'hover:bg-cotton text-noir'
+                                        } ${!isLast ? 'border-b border-noir/5' : ''}`}
+                                      >
+                                        <div className="flex items-center gap-3">
+                                          <span className="font-semibold">US {size}</span>
+                                          {best && (
+                                            <span className={`text-sm ${isSelected ? 'text-cherry/70' : 'text-noir/50'}`}>
+                                              {formatPrice(best.price)}
+                                            </span>
+                                          )}
+                                        </div>
+                                        {isSelected && <Check className="w-4 h-4" />}
+                                      </button>
+                                    );
+                                  })
+                                )}
+                              </div>
+
+                              {/* Bottom scroll indicator */}
+                              <AnimatePresence>
+                                {canScrollDown && (
+                                  <motion.div
+                                    initial={{ opacity: 0 }}
+                                    animate={{ opacity: 1 }}
+                                    exit={{ opacity: 0 }}
+                                    className="absolute bottom-0 left-0 right-0 z-10 flex justify-center items-end h-10 bg-gradient-to-t from-white from-60% to-transparent pointer-events-none"
+                                  >
+                                    <ChevronDown className="w-5 h-5 text-noir/50 mb-1" />
+                                  </motion.div>
+                                )}
+                              </AnimatePresence>
                             </div>
                           </motion.div>
-                        );
-                      })}
+                        )}
+                      </AnimatePresence>
                     </div>
+                    
+                    {!hasAnyData && !isAnyLoading && (
+                      <p className="text-noir/40 text-sm mt-3">No sizes available yet</p>
+                    )}
                   </div>
-
-                  {/* Size Selector - Shows as sizes come in */}
-                  {hasAnyData && (
-                    <motion.div 
-                      className="bg-white rounded-2xl p-6 mb-6 border border-noir/5 shadow-md"
-                      initial={{ opacity: 0, y: 20 }}
-                      animate={{ opacity: 1, y: 0 }}
-                    >
-                      <p className="text-noir/60 text-sm mb-4">
-                        Select your size {isAnyLoading && <span className="text-noir/40">(more sizes loading...)</span>}:
-                      </p>
-                      <div className="flex flex-wrap gap-2">
-                        {allSizes.map((size) => {
-                          const best = getBestPriceForSize(size);
-                          const isSelected = selectedSize === size;
-                          
-                          return (
-                            <motion.button
-                              key={size}
-                              onClick={() => setSelectedSize(isSelected ? null : size)}
-                              className={`relative px-4 py-3 rounded-xl border transition-all ${
-                                isSelected
-                                  ? 'bg-cherry text-cotton border-cherry'
-                                  : 'bg-cotton text-noir border-noir/10 hover:border-noir/30'
-                              }`}
-                              initial={{ opacity: 0, scale: 0.9 }}
-                              animate={{ opacity: 1, scale: 1 }}
-                              layout
-                            >
-                              <span className="font-medium">{size}</span>
-                              {best && (
-                                <span className={`block text-xs mt-0.5 ${isSelected ? 'text-cotton/80' : 'text-noir/40'}`}>
-                                  {formatPrice(best.price)}
-                                </span>
-                              )}
-                            </motion.button>
-                          );
-                        })}
-                      </div>
-                    </motion.div>
-                  )}
 
                   {/* Price Comparison Table */}
                   <AnimatePresence mode="wait">
@@ -453,11 +554,11 @@ export default function Product() {
                         exit={{ opacity: 0, y: -10 }}
                         className="space-y-3"
                       >
-                        <p className="text-noir/60 text-sm mb-4">
+                        <p className="text-noir/60 text-sm mb-3">
                           Prices for size <span className="text-noir font-semibold">{selectedSize}</span>:
                         </p>
                         
-                        {SOURCES.map((source) => {
+                        {SOURCES.map((source, sourceIndex) => {
                           const state = sourceStates[source];
                           const sizeData = getPriceForSize(source, selectedSize);
                           const config = sourceConfig[source];
@@ -470,7 +571,8 @@ export default function Product() {
                               key={source}
                               initial={{ opacity: 0, x: -10 }}
                               animate={{ opacity: 1, x: 0 }}
-                              className={`flex items-center justify-between p-4 rounded-xl transition-all ${
+                              transition={{ delay: sourceIndex * 0.05 }}
+                              className={`flex items-center justify-between p-3 sm:p-4 rounded-lg sm:rounded-xl transition-all ${
                                 state.loading
                                   ? 'bg-white border border-noir/10'
                                   : sizeData
@@ -480,55 +582,43 @@ export default function Product() {
                                     : 'bg-white/50 border border-noir/5 opacity-50'
                               }`}
                             >
-                              <div className="flex items-center gap-4">
-                                <div className={`w-3 h-3 rounded-full ${config.color}`} />
-                                <span className="text-noir font-medium">{config.name}</span>
+                              <div className="flex items-center gap-2 sm:gap-3">
+                                <div className={`w-2.5 sm:w-3 h-2.5 sm:h-3 rounded-full ${config.color}`} />
+                                <span className="text-noir font-semibold text-xs sm:text-base">{config.name}</span>
                                 {isBest && sizeData && !state.loading && (
-                                  <span className="flex items-center gap-1 text-xs text-green-700 bg-green-100 px-2 py-0.5 rounded-full">
+                                  <span className="hidden sm:flex items-center gap-1 text-xs text-green-700 bg-green-100 px-2 py-0.5 rounded-full">
                                     <Zap className="w-3 h-3" />
-                                    Best Price
+                                    Best
                                   </span>
                                 )}
                               </div>
                               
-                              <div className="flex items-center gap-3">
+                              <div className="flex items-center gap-2 sm:gap-3">
                                 {state.loading ? (
                                   <>
-                                    <Loader2 className="w-4 h-4 text-cherry animate-spin" />
-                                    <span className="text-noir/40 text-sm">Loading...</span>
+                                    <Loader2 className="w-3 sm:w-4 h-3 sm:h-4 text-cherry animate-spin" />
+                                    <span className="text-noir/40 text-xs sm:text-sm">Loading...</span>
                                   </>
                                 ) : sizeData ? (
                                   <a
                                     href={url}
                                     target="_blank"
                                     rel="noopener noreferrer"
-                                    className="flex items-center gap-3 group"
+                                    className="flex items-center gap-2 sm:gap-3 group"
                                   >
-                                    <span className="font-mono font-bold text-lg text-noir">
+                                    <span className="font-bold text-sm sm:text-lg text-noir">
                                       {formatPrice(sizeData.priceCAD || sizeData.price)}
                                     </span>
-                                    <ExternalLink className="w-4 h-4 text-noir/40 group-hover:text-cherry transition-colors" />
+                                    <ExternalLink className="w-3.5 sm:w-4 h-3.5 sm:h-4 text-noir/50 group-hover:text-cherry transition-colors" />
                                   </a>
                                 ) : (
-                                  <span className="text-noir/40 text-sm">Not available</span>
+                                  <span className="text-noir/40 text-xs sm:text-sm">Unavailable</span>
                                 )}
                               </div>
                             </motion.div>
                           );
                         })}
                       </motion.div>
-                    ) : hasAnyData ? (
-                      <motion.div
-                        initial={{ opacity: 0 }}
-                        animate={{ opacity: 1 }}
-                        className="bg-white rounded-2xl p-8 text-center border border-noir/5 shadow-md"
-                      >
-                        <p className="text-noir/60">Select a size above to compare prices</p>
-                      </motion.div>
-                    ) : !isAnyLoading ? (
-                      <div className="bg-white rounded-2xl p-8 text-center border border-noir/5 shadow-md">
-                        <p className="text-noir/60">No sizes available from any source.</p>
-                      </div>
                     ) : null}
                   </AnimatePresence>
                 </>
