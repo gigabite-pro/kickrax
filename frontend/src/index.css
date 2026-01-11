@@ -1,0 +1,170 @@
+@import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Work+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --color-cotton: #faf8ed;
+  --color-cherry: #b30000;
+  --color-noir: #1b1717;
+  --font-display: 'Bebas Neue', sans-serif;
+  --font-body: 'Work Sans', sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+}
+
+* {
+  box-sizing: border-box;
+  padding: 0;
+  margin: 0;
+}
+
+html,
+body {
+  max-width: 100vw;
+  overflow-x: hidden;
+}
+
+body {
+  background: var(--color-cotton);
+  color: var(--color-noir);
+  font-family: var(--font-body);
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #f0ede0;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-noir);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #2d2828;
+}
+
+/* Selection */
+::selection {
+  background: var(--color-cherry);
+  color: var(--color-cotton);
+}
+
+/* Gradient text utility */
+.gradient-text {
+  background: linear-gradient(135deg, var(--color-cherry) 0%, #cc1a1a 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* Card style */
+.card {
+  background: white;
+  border: 1px solid rgba(27, 23, 23, 0.1);
+  box-shadow: 0 4px 20px rgba(27, 23, 23, 0.08);
+}
+
+.card:hover {
+  box-shadow: 0 8px 30px rgba(179, 0, 0, 0.12);
+}
+
+/* Glass morphism - light version */
+.glass {
+  background: rgba(255, 255, 255, 0.8);
+  backdrop-filter: blur(20px);
+  border: 1px solid rgba(27, 23, 23, 0.08);
+}
+
+/* Subtle pattern background */
+.pattern-bg {
+  background-image: 
+    radial-gradient(circle at 1px 1px, rgba(27, 23, 23, 0.03) 1px, transparent 0);
+  background-size: 40px 40px;
+}
+
+/* Glow effects */
+.glow-cherry {
+  box-shadow: 0 0 60px -15px rgba(179, 0, 0, 0.3);
+}
+
+/* Input focus states */
+input:focus, 
+button:focus {
+  outline: none;
+}
+
+/* Loader animation */
+@keyframes shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    #f0ede0 25%,
+    #e8e5d8 50%,
+    #f0ede0 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+}
+
+/* Price comparison bar */
+.price-bar {
+  height: 4px;
+  border-radius: 2px;
+  background: linear-gradient(90deg, var(--color-cherry), #cc1a1a);
+}
+
+/* Hover lift effect */
+.hover-lift {
+  transition: transform 0.3s ease, box-shadow 0.3s ease;
+}
+
+.hover-lift:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 20px 40px -15px rgba(27, 23, 23, 0.15);
+}
+
+/* Stagger animation delays */
+.stagger-1 { animation-delay: 0.1s; }
+.stagger-2 { animation-delay: 0.2s; }
+.stagger-3 { animation-delay: 0.3s; }
+.stagger-4 { animation-delay: 0.4s; }
+.stagger-5 { animation-delay: 0.5s; }
+
+/* Cherry accent button */
+.btn-cherry {
+  background: var(--color-cherry);
+  color: var(--color-cotton);
+  transition: all 0.2s ease;
+}
+
+.btn-cherry:hover {
+  background: #cc1a1a;
+  box-shadow: 0 4px 20px rgba(179, 0, 0, 0.3);
+}
+
+/* Noir outline button */
+.btn-outline {
+  background: transparent;
+  border: 2px solid var(--color-noir);
+  color: var(--color-noir);
+  transition: all 0.2s ease;
+}
+
+.btn-outline:hover {
+  background: var(--color-noir);
+  color: var(--color-cotton);
+}

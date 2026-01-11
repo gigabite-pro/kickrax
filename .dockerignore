@@ -1,5 +1,7 @@
 node_modules
+**/node_modules
 dist
+**/dist
 .git
 .gitignore
 *.md
@@ -7,4 +9,3 @@ dist
 .env.local
 .DS_Store
 *.log
-

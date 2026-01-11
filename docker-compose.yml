@@ -10,9 +10,13 @@ services:
             - NODE_ENV=development
             - PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
         volumes:
-            # Persist node_modules in a named volume for faster rebuilds
-            - node_modules:/app/node_modules
+            # Persist node_modules in named volumes for faster rebuilds
+            - root_node_modules:/app/node_modules
+            - frontend_node_modules:/app/frontend/node_modules
+            - backend_node_modules:/app/backend/node_modules
         restart: unless-stopped
 
 volumes:
-    node_modules:
+    root_node_modules:
+    frontend_node_modules:
+    backend_node_modules:

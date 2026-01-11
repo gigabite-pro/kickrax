@@ -32,11 +32,28 @@ ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
 # Create app directory
 WORKDIR /app
 
-# Copy package files
+# Copy root package.json
 COPY package*.json ./
 
-# Install dependencies
+# Copy frontend package files
+COPY frontend/package*.json ./frontend/
+
+# Copy backend package files
+COPY backend/package*.json ./backend/
+
+# Install root dependencies
 RUN npm ci
+
+# Install frontend dependencies
+WORKDIR /app/frontend
+RUN npm ci
+
+# Install backend dependencies
+WORKDIR /app/backend
+RUN npm ci
+
+# Go back to app root
+WORKDIR /app
 
 # Copy source code
 COPY . .
@@ -46,4 +63,3 @@ EXPOSE 3001 5173
 
 # Start the app in dev mode
 CMD ["npm", "run", "dev"]
-
