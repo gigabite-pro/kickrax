@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, useCallback, ReactNode } from 'react';
 import { CatalogProduct } from '../types';
+import { api } from '../lib/api';
 
 interface SearchContextType {
   results: CatalogProduct[];
@@ -28,7 +29,7 @@ export function SearchProvider({ children }: { children: ReactNode }) {
     setResults([]);
 
     try {
-      const response = await fetch(`/api/search?q=${encodeURIComponent(query)}`);
+      const response = await fetch(api(`/api/search?q=${encodeURIComponent(query)}`));
 
       if (!response.ok) {
         throw new Error('Search failed');

@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { ArrowLeft, ExternalLink, Loader2, Zap, Tag, ChevronDown, ChevronUp, Check } from 'lucide-react';
 import Header from '../components/Header';
 import { CatalogProduct } from '../types';
+import { api } from '../lib/api';
 
 interface SizeData {
   size: string;
@@ -138,7 +139,7 @@ export default function Product() {
     }));
 
     try {
-      const response = await fetch(`/api/prices/${source}?sku=${encodeURIComponent(searchSku)}`, { signal });
+      const response = await fetch(api(`/api/prices/${source}?sku=${encodeURIComponent(searchSku)}`), { signal });
       const result = await response.json();
       
       setSourceStates(prev => ({
@@ -183,7 +184,7 @@ export default function Product() {
       const startTime = Date.now();
       
       try {
-        const response = await fetch(`/api/product/style?url=${encodeURIComponent(product.stockxUrl)}`, { signal });
+        const response = await fetch(api(`/api/product/style?url=${encodeURIComponent(product.stockxUrl)}`), { signal });
         const data = await response.json();
         
         if (data.styleId) {

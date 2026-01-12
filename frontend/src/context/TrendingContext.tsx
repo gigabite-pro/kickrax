@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, useCallback, useRef, ReactNode } from 'react';
 import { CatalogProduct } from '../types';
+import { api } from '../lib/api';
 
 interface TrendingContextType {
   trending: CatalogProduct[];
@@ -21,7 +22,7 @@ export function TrendingProvider({ children }: { children: ReactNode }) {
 
     setTrendingLoading(true);
     try {
-      const response = await fetch("/api/trending");
+      const response = await fetch(api("/api/trending"));
       if (!response.ok) throw new Error("Failed to fetch trending");
       const data = await response.json();
       setTrending(data.products || []);
