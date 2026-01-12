@@ -350,8 +350,8 @@ export default function Product() {
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
             >
-              <div className="bg-white rounded-xl sm:rounded-2xl overflow-hidden border border-noir/5 shadow-lg flex flex-row sm:flex-row lg:flex-col">
-                <div className="w-1/3 sm:w-1/3 lg:w-full aspect-square lg:aspect-[4/3] bg-cotton-dark flex-shrink-0 overflow-hidden relative">
+              <div className="bg-white rounded-xl sm:rounded-2xl overflow-hidden border border-noir/5 shadow-lg flex flex-col sm:flex-row lg:flex-col">
+                <div className="w-full sm:w-1/3 lg:w-full aspect-[4/3] sm:aspect-square lg:aspect-[4/3] bg-cotton-dark flex-shrink-0 overflow-hidden relative">
                   {/* Use HD image from StockX if available, otherwise fall back to product image */}
                   {(sourceStates.stockx.data?.imageUrl || product?.imageUrl) ? (
                     <img

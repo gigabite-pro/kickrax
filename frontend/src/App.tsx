@@ -4,19 +4,22 @@ import About from './pages/About'
 import Trending from './pages/Trending'
 import Product from './pages/Product'
 import { TrendingProvider } from './context/TrendingContext'
+import { SearchProvider } from './context/SearchContext'
 
 function App() {
   return (
     <TrendingProvider>
-      <div className="noise-overlay" />
-      <div className="grid-bg min-h-screen">
-        <Routes>
-          <Route path="/" element={<Home />} />
-          <Route path="/about" element={<About />} />
-          <Route path="/trending" element={<Trending />} />
-          <Route path="/product/:sku" element={<Product />} />
-        </Routes>
-      </div>
+      <SearchProvider>
+        <div className="noise-overlay" />
+        <div className="grid-bg min-h-screen">
+          <Routes>
+            <Route path="/" element={<Home />} />
+            <Route path="/about" element={<About />} />
+            <Route path="/trending" element={<Trending />} />
+            <Route path="/product/:sku" element={<Product />} />
+          </Routes>
+        </div>
+      </SearchProvider>
     </TrendingProvider>
   )
 }

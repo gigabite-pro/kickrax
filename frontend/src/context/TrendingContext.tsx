@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useCallback, ReactNode } from 'react';
+import { createContext, useContext, useState, useCallback, useRef, ReactNode } from 'react';
 import { CatalogProduct } from '../types';
 
 interface TrendingContextType {
@@ -12,9 +12,12 @@ const TrendingContext = createContext<TrendingContextType | null>(null);
 export function TrendingProvider({ children }: { children: ReactNode }) {
   const [trending, setTrending] = useState<CatalogProduct[]>([]);
   const [trendingLoading, setTrendingLoading] = useState(false);
+  const hasFetchedRef = useRef(false);
 
   const fetchTrending = useCallback(async () => {
-    if (trending.length > 0 || trendingLoading) return;
+    // Use ref to prevent duplicate fetches
+    if (hasFetchedRef.current) return;
+    hasFetchedRef.current = true;
 
     setTrendingLoading(true);
     try {
@@ -24,10 +27,11 @@ export function TrendingProvider({ children }: { children: ReactNode }) {
       setTrending(data.products || []);
     } catch (err) {
       console.error("Trending fetch error:", err);
+      hasFetchedRef.current = false; // Allow retry on error
     } finally {
       setTrendingLoading(false);
     }
-  }, [trending.length, trendingLoading]);
+  }, []);
 
   return (
     <TrendingContext.Provider value={{ trending, trendingLoading, fetchTrending }}>
@@ -43,4 +47,5 @@ export function useTrending() {
   }
   return context;
 }
+
 

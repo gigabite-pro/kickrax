@@ -7,9 +7,13 @@ import { CatalogProduct } from "../types";
 import { motion } from "framer-motion";
 import { ChevronDown } from "lucide-react";
 import { useTrending } from "../context/TrendingContext";
+import { useSearch } from "../context/SearchContext";
 
 // Lazy load the 3D component to avoid React version conflicts
 const ShoeModel = lazy(() => import("../components/ShoeModel"));
+
+// Max items to show for stagger animation grouping
+const STAGGER_GROUP_SIZE = 10;
 
 interface StockXProductCardProps {
     product: CatalogProduct;
@@ -70,29 +74,19 @@ function StockXProductCard({ product, index }: StockXProductCardProps) {
     );
 }
 
-const INITIAL_VISIBLE = 20;
-const LOAD_MORE_COUNT = 10;
-
 export default function Home() {
-    const [results, setResults] = useState<CatalogProduct[]>([]);
-    const [isLoading, setIsLoading] = useState(false);
-    const [hasSearched, setHasSearched] = useState(false);
-    const [currentQuery, setCurrentQuery] = useState("");
-    const [error, setError] = useState<string | null>(null);
     const [mousePosition, setMousePosition] = useState({ x: 0, y: 0 });
-    const [visibleCount, setVisibleCount] = useState(INITIAL_VISIBLE);
-    const [trendingVisible, setTrendingVisible] = useState(INITIAL_VISIBLE);
-    const loaderRef = useRef<HTMLDivElement>(null);
     const trendingRef = useRef<HTMLElement>(null);
-    const trendingLoaderRef = useRef<HTMLDivElement>(null);
 
-    // Use context for trending data persistence
+    // Use context for search and trending data persistence
+    const { results, isLoading, hasSearched, currentQuery, error, search } = useSearch();
     const { trending, trendingLoading, fetchTrending } = useTrending();
 
     // Fetch trending on page load
     useEffect(() => {
         fetchTrending();
-    }, [fetchTrending]);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
 
     // Track mouse position for 3D model movement
     useEffect(() => {
@@ -107,47 +101,10 @@ export default function Home() {
         return () => window.removeEventListener("mousemove", handleMouseMove);
     }, []);
 
-    // Show more products when scrolling (local pagination)
-    useEffect(() => {
-        const observer = new IntersectionObserver(
-            (entries) => {
-                if (entries[0].isIntersecting && visibleCount < results.length) {
-                    setVisibleCount((prev) => Math.min(prev + LOAD_MORE_COUNT, results.length));
-                }
-            },
-            { threshold: 0.1 }
-        );
-
-        if (loaderRef.current) {
-            observer.observe(loaderRef.current);
-        }
-
-        return () => observer.disconnect();
-    }, [visibleCount, results.length]);
-
-    // Show more trending products on scroll
-    useEffect(() => {
-        const observer = new IntersectionObserver(
-            (entries) => {
-                if (entries[0].isIntersecting && trendingVisible < trending.length) {
-                    setTrendingVisible((prev) => Math.min(prev + LOAD_MORE_COUNT, trending.length));
-                }
-            },
-            { threshold: 0.1 }
-        );
-
-        if (trendingLoaderRef.current) {
-            observer.observe(trendingLoaderRef.current);
-        }
-
-        return () => observer.disconnect();
-    }, [trendingVisible, trending.length]);
-
-    // Scroll to trending section and fetch data
+    // Scroll to trending section
     const scrollToTrending = useCallback(() => {
-        fetchTrending();
         trendingRef.current?.scrollIntoView({ behavior: "smooth" });
-    }, [fetchTrending]);
+    }, []);
 
     // Update page title for SEO
     useEffect(() => {
@@ -158,32 +115,9 @@ export default function Home() {
         }
     }, [hasSearched, currentQuery]);
 
-    const handleSearch = useCallback(async (query: string) => {
-        setIsLoading(true);
-        setHasSearched(true);
-        setCurrentQuery(query);
-        setError(null);
-        setVisibleCount(INITIAL_VISIBLE);
-        setResults([]);
-
-        try {
-            const response = await fetch(`/api/search?q=${encodeURIComponent(query)}`);
-
-            if (!response.ok) {
-                throw new Error("Search failed");
-            }
-
-            const data = await response.json();
-            console.log("Search response:", data);
-            setResults(data.products || []);
-        } catch (err) {
-            console.error("Search error:", err);
-            setError("Failed to search. Please try again.");
-            setResults([]);
-        } finally {
-            setIsLoading(false);
-        }
-    }, []);
+    const handleSearch = (query: string) => {
+        search(query);
+    };
 
     // If not searched yet, show hero with 100vh no scroll
     if (!hasSearched) {
@@ -192,7 +126,7 @@ export default function Home() {
                 <Header onSearch={handleSearch} isLoading={isLoading} />
 
                 {/* Hero with 3D Model */}
-                <section className="h-screen pt-16 sm:pt-20 px-4 sm:px-6 relative flex flex-col items-center justify-center">
+                <section className="h-screen min-h-screen pt-28 md:pt-20 px-4 sm:px-6 relative flex flex-col items-center justify-center overflow-hidden">
                     <div className="max-w-7xl mx-auto text-center relative w-full">
                         {/* Tagline */}
                         <motion.p
@@ -209,7 +143,7 @@ export default function Home() {
                             initial={{ opacity: 0, y: 20 }}
                             animate={{ opacity: 1, y: 0 }}
                             transition={{ delay: 0.15 }}
-                            className="font-display text-4xl sm:text-6xl md:text-8xl lg:text-[10rem] leading-[0.9] tracking-tight text-noir"
+                            className="font-display text-4xl sm:text-6xl md:text-8xl lg:text-[10rem] leading-[0.85] tracking-tight text-noir"
                         >
                             STOP <span className="text-cherry">OVERPAYING</span>
                         </motion.h1>
@@ -218,14 +152,14 @@ export default function Home() {
                             initial={{ opacity: 0, y: 20 }}
                             animate={{ opacity: 1, y: 0 }}
                             transition={{ delay: 0.2 }}
-                            className="font-display text-4xl sm:text-6xl md:text-8xl lg:text-[10rem] leading-[0.9] tracking-tight text-noir"
+                            className="font-display text-4xl sm:text-6xl md:text-8xl lg:text-[10rem] leading-[0.85] tracking-tight text-noir"
                         >
                             FOR <span className="text-cherry">KICKS</span>
                         </motion.h1>
 
                         {/* 3D Shoe Model - Below text, overlapping */}
                         <div className="relative -mt-12 sm:-mt-24 md:-mt-32 lg:-mt-40">
-                            <div className="relative h-[220px] sm:h-[350px] md:h-[420px] lg:h-[500px] pointer-events-none overflow-visible">
+                            <div className="relative h-[220px] sm:h-[350px] md:h-[420px] lg:h-[500px] pointer-events-auto overflow-visible">
                                 <Suspense fallback={null}>
                                     <ShoeModel mousePosition={mousePosition} />
                                 </Suspense>
@@ -239,7 +173,7 @@ export default function Home() {
                         animate={{ opacity: 1 }}
                         transition={{ delay: 0.5 }}
                         onClick={scrollToTrending}
-                        className="absolute bottom-6 left-1/2 -translate-x-1/2 w-10 h-10 rounded-full border border-noir/30 bg-white/50 backdrop-blur-sm flex items-center justify-center hover:border-cherry hover:bg-cherry/10 transition-colors group z-10"
+                        className="absolute bottom-12 sm:bottom-10 left-1/2 -translate-x-1/2 w-10 h-10 rounded-full border border-noir/30 bg-white/50 backdrop-blur-sm flex items-center justify-center hover:border-cherry hover:bg-cherry/10 transition-colors group z-10"
                     >
                         <motion.div animate={{ y: ["-1.5px", "2px", "-1.5px"] }} transition={{ duration: 1.5, repeat: Infinity, ease: "easeInOut" }}>
                             <ChevronDown className="w-5 h-5 text-noir/60 group-hover:text-cherry" strokeWidth={2} />
@@ -248,7 +182,7 @@ export default function Home() {
                 </section>
 
                 {/* Trending Section */}
-                <section ref={trendingRef} className="min-h-screen px-4 sm:px-6 py-10 sm:py-16">
+                <section ref={trendingRef} className="min-h-screen px-4 sm:px-6 pt-16 sm:pt-20 pb-10 sm:pb-16 scroll-mt-24 sm:scroll-mt-28">
                     <div className="max-w-7xl mx-auto">
                         <motion.h2
                             initial={{ opacity: 0, y: 20 }}
@@ -262,18 +196,14 @@ export default function Home() {
                         {trendingLoading ? (
                             <LoadingSkeleton />
                         ) : trending.length > 0 ? (
-                            <>
-                                <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 sm:gap-6">
-                                    {trending.slice(0, trendingVisible).map((product, index) => (
-                                        <StockXProductCard key={product.id} product={product} index={index % LOAD_MORE_COUNT} />
-                                    ))}
-                                </div>
-
-                                {trendingVisible < trending.length && <div ref={trendingLoaderRef} className="h-16" />}
-                            </>
+                            <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 sm:gap-6">
+                                {trending.map((product, index) => (
+                                    <StockXProductCard key={product.id} product={product} index={index % STAGGER_GROUP_SIZE} />
+                                ))}
+                            </div>
                         ) : (
                             <div className="text-center py-12 text-noir/40">
-                                <p>Scroll down to load trending sneakers</p>
+                                <p>No trending sneakers found</p>
                             </div>
                         )}
                     </div>
@@ -288,7 +218,7 @@ export default function Home() {
             <Header onSearch={handleSearch} isLoading={isLoading} />
 
             {/* Results */}
-            <section className="px-4 sm:px-6 pt-20 sm:pt-24 pb-8 sm:pb-12">
+            <section className="px-4 sm:px-6 pt-32 md:pt-24 pb-8 sm:pb-12">
                 <div className="max-w-7xl mx-auto">
                     {isLoading ? (
                         <LoadingSkeleton />
@@ -301,13 +231,10 @@ export default function Home() {
 
                             {/* Grid */}
                             <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 sm:gap-6">
-                                {results.slice(0, visibleCount).map((product, index) => (
-                                    <StockXProductCard key={product.id} product={product} index={index % LOAD_MORE_COUNT} />
+                                {results.map((product, index) => (
+                                    <StockXProductCard key={product.id} product={product} index={index % STAGGER_GROUP_SIZE} />
                                 ))}
                             </div>
-
-                            {/* Scroll trigger for loading more */}
-                            {visibleCount < results.length && <div ref={loaderRef} className="h-16" />}
                         </div>
                     ) : (
                         <EmptyState type="no-results" query={currentQuery} />
