@@ -4,16 +4,28 @@ import { SOURCES, SneakerListing, CatalogProduct } from "../../types.js";
 import { ScraperResult, generateListingId } from "../types.js";
 import { launchBrowser, createPage, getPuppeteerOptions, AbortSignal, checkAbort, sleepWithAbort } from "../browser.js";
 
-// Keep browser instance alive for performance
+// Browser instance with request counter for rotation
 let browser: Browser | null = null;
+let requestCount = 0;
+const MAX_REQUESTS_PER_BROWSER = 3; // Rotate browser after 3 requests to avoid detection
 
 async function getBrowser(): Promise<Browser> {
-    if (browser && browser.isConnected()) {
+    // Force new browser after MAX_REQUESTS or if disconnected
+    if (browser && browser.isConnected() && requestCount < MAX_REQUESTS_PER_BROWSER) {
+        requestCount++;
         return browser;
     }
 
-    console.log("[StockX] Launching browser...");
+    // Close old browser if exists
+    if (browser) {
+        console.log("[StockX] Rotating browser to avoid detection...");
+        await browser.close().catch(() => {});
+        browser = null;
+    }
+
+    console.log("[StockX] Launching fresh browser...");
     browser = await puppeteer.launch(getPuppeteerOptions());
+    requestCount = 1;
 
     return browser;
 }
@@ -108,13 +120,27 @@ export async function searchStockXCatalog(query?: string, sort?: string): Promis
 
         // Set realistic viewport and user agent
         await page.setViewport({ width: 1920, height: 1080 });
-        await page.setUserAgent("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
+        
+        // Randomize user agent slightly
+        const chromeVersions = ['120', '121', '122', '123', '124'];
+        const randomVersion = chromeVersions[Math.floor(Math.random() * chromeVersions.length)];
+        await page.setUserAgent(`Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${randomVersion}.0.0.0 Safari/537.36`);
 
-        // Navigate to search page
-        await page.goto(searchUrl, {
-            waitUntil: "networkidle2", // Wait for network to be idle
-            timeout: 30000,
+        // Anti-detection: hide webdriver property
+        await page.evaluateOnNewDocument(() => {
+            Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+            // @ts-ignore
+            window.chrome = { runtime: {} };
         });
+
+        // Navigate to search page with shorter timeout
+        await page.goto(searchUrl, {
+            waitUntil: "domcontentloaded", // Faster than networkidle2
+            timeout: 20000,
+        });
+        
+        // Small random delay to seem more human
+        await new Promise(resolve => setTimeout(resolve, 500 + Math.random() * 1000));
 
         // Wait for product tiles to load
         try {

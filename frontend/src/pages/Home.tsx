@@ -12,8 +12,6 @@ import { useSearch } from "../context/SearchContext";
 // Lazy load the 3D component to avoid React version conflicts
 const ShoeModel = lazy(() => import("../components/ShoeModel"));
 
-// Max items to show for stagger animation grouping
-const STAGGER_GROUP_SIZE = 10;
 
 interface StockXProductCardProps {
     product: CatalogProduct;
@@ -30,13 +28,17 @@ function StockXProductCard({ product, index }: StockXProductCardProps) {
         });
     };
 
+    // Calculate stagger delay based on position in row (resets per row for better effect)
+    const staggerDelay = (index % 5) * 0.08;
+
     return (
         <motion.div
-            initial={{ opacity: 0, y: 30, scale: 0.95 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
+            initial={{ opacity: 0, y: 40, scale: 0.9 }}
+            whileInView={{ opacity: 1, y: 0, scale: 1 }}
+            viewport={{ once: true, margin: "-50px" }}
             transition={{
-                delay: index * 0.04,
-                duration: 0.4,
+                delay: staggerDelay,
+                duration: 0.5,
                 ease: [0.25, 0.46, 0.45, 0.94],
             }}
             onClick={handleClick}
@@ -198,7 +200,7 @@ export default function Home() {
                         ) : trending.length > 0 ? (
                             <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 sm:gap-6">
                                 {trending.map((product, index) => (
-                                    <StockXProductCard key={product.id} product={product} index={index % STAGGER_GROUP_SIZE} />
+                                    <StockXProductCard key={product.id} product={product} index={index} />
                                 ))}
                             </div>
                         ) : (
@@ -232,7 +234,7 @@ export default function Home() {
                             {/* Grid */}
                             <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 sm:gap-6">
                                 {results.map((product, index) => (
-                                    <StockXProductCard key={product.id} product={product} index={index % STAGGER_GROUP_SIZE} />
+                                    <StockXProductCard key={product.id} product={product} index={index} />
                                 ))}
                             </div>
                         </div>
