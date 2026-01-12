@@ -97,8 +97,10 @@ export default function ShoeModel({ mousePosition }: ShoeModelProps) {
         };
     }, []);
 
-    // Check if iOS needs permission
-    const needsPermission = typeof (DeviceOrientationEvent as unknown as { requestPermission?: () => Promise<string> }).requestPermission === 'function';
+    // Check if iOS needs permission (safely check if DeviceOrientationEvent exists)
+    const needsPermission = typeof window !== 'undefined' && 
+        typeof DeviceOrientationEvent !== 'undefined' && 
+        typeof (DeviceOrientationEvent as unknown as { requestPermission?: () => Promise<string> }).requestPermission === 'function';
 
     // Auto-enable motion for Android (no permission needed)
     useEffect(() => {
@@ -119,6 +121,8 @@ export default function ShoeModel({ mousePosition }: ShoeModelProps) {
 
     // Manual permission request for iOS (must be triggered by user gesture)
     const requestMotionPermission = async () => {
+        if (typeof DeviceOrientationEvent === 'undefined') return;
+        
         try {
             const requestPermission = (DeviceOrientationEvent as unknown as { requestPermission?: () => Promise<string> }).requestPermission;
             if (requestPermission) {
