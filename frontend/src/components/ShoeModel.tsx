@@ -50,8 +50,22 @@ function Shoe({ mousePosition, deviceOrientation }: ShoeProps) {
         }
     });
 
+    // Scale based on viewport: larger on desktop, bigger on mobile
+    const getScale = () => {
+        if (viewport.width > 8) return 11; // Large desktop
+        if (viewport.width > 6) return 10; // Desktop
+        if (viewport.width > 4) return 9;  // Tablet
+        return 9; // Mobile - same as tablet for bigger appearance
+    };
+
+    // Position: centered on mobile, offset on desktop
+    const getPosition = (): [number, number, number] => {
+        if (viewport.width > 6) return [-0.3, -0.65, 0]; // Desktop - offset left
+        return [0, -0.65, 0]; // Mobile/tablet - centered
+    };
+
     return (
-        <group ref={meshRef} scale={viewport.width > 6 ? 10 : 7} position={[-0.3, -0.65, 0]} rotation={[0.15, -3, 0]}>
+        <group ref={meshRef} scale={getScale()} position={getPosition()} rotation={[0.15, -3, 0]}>
             <primitive object={scene} />
         </group>
     );
@@ -84,47 +98,58 @@ export default function ShoeModel({ mousePosition }: ShoeModelProps) {
         };
     }, []);
 
-    // Auto-enable motion on page load
-    useEffect(() => {
-        if (!isMobile) return;
-        
-        const enableMotion = async () => {
-            // Check if permission API exists (iOS 13+)
-            const requestPermission = (DeviceOrientationEvent as unknown as { requestPermission?: () => Promise<string> }).requestPermission;
-            
-            if (requestPermission) {
-                // iOS 13+ - request permission automatically
-                try {
-                    const permission = await requestPermission();
-                    if (permission === 'granted') {
-                        setPermissionGranted(true);
-                        if (orientationHandlerRef.current) {
-                            window.addEventListener('deviceorientation', orientationHandlerRef.current);
-                        }
-                    }
-                } catch (error) {
-                    console.log('Device orientation permission denied:', error);
-                }
-            } else {
-                // Android or older iOS - just add listener directly
-                setPermissionGranted(true);
-                if (orientationHandlerRef.current) {
-                    window.addEventListener('deviceorientation', orientationHandlerRef.current);
-                }
-            }
-        };
+    // Check if iOS needs permission
+    const needsPermission = typeof (DeviceOrientationEvent as unknown as { requestPermission?: () => Promise<string> }).requestPermission === 'function';
 
-        enableMotion();
+    // Auto-enable motion for Android (no permission needed)
+    useEffect(() => {
+        if (!isMobile || needsPermission) return;
+        
+        // Android or older iOS - just add listener directly
+        setPermissionGranted(true);
+        if (orientationHandlerRef.current) {
+            window.addEventListener('deviceorientation', orientationHandlerRef.current);
+        }
         
         return () => {
             if (orientationHandlerRef.current) {
                 window.removeEventListener('deviceorientation', orientationHandlerRef.current);
             }
         };
-    }, [isMobile]);
+    }, [isMobile, needsPermission]);
+
+    // Manual permission request for iOS (must be triggered by user gesture)
+    const requestMotionPermission = async () => {
+        try {
+            const requestPermission = (DeviceOrientationEvent as unknown as { requestPermission?: () => Promise<string> }).requestPermission;
+            if (requestPermission) {
+                const permission = await requestPermission();
+                if (permission === 'granted') {
+                    setPermissionGranted(true);
+                    if (orientationHandlerRef.current) {
+                        window.addEventListener('deviceorientation', orientationHandlerRef.current);
+                    }
+                }
+            }
+        } catch (error) {
+            console.log('Device orientation permission denied:', error);
+        }
+    };
+
+    // Show tap button only on iOS that needs permission
+    const showMotionButton = isMobile && needsPermission && !permissionGranted;
 
     return (
         <div className="absolute inset-0 w-full h-full flex items-center justify-center">
+            {/* Tap button for iOS to enable motion */}
+            {showMotionButton && (
+                <button
+                    onClick={requestMotionPermission}
+                    className="absolute top-4 left-1/2 -translate-x-1/2 z-20 bg-noir/70 backdrop-blur-sm text-cotton text-xs px-4 py-2 rounded-full hover:bg-noir/90 transition-colors"
+                >
+                    Tap to enable motion
+                </button>
+            )}
             
             <Canvas shadows camera={{ position: [0, 0, 5], fov: 35 }} style={{ background: "transparent" }}>
                 <ambientLight intensity={0.7} />

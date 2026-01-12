@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: kickrax-api
+    runtime: docker
+    region: oregon
+    rootDir: backend
+    dockerfilePath: ./Dockerfile
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: "3001"
+    healthCheckPath: /api/health

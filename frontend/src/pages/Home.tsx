@@ -126,14 +126,14 @@ export default function Home() {
                 <Header onSearch={handleSearch} isLoading={isLoading} />
 
                 {/* Hero with 3D Model */}
-                <section className="h-screen min-h-screen pt-28 md:pt-20 px-4 sm:px-6 relative flex flex-col items-center justify-center overflow-hidden">
+                <section className="h-screen min-h-[600px] pt-28 md:pt-20 px-4 sm:px-6 relative flex flex-col items-center justify-center overflow-hidden">
                     <div className="max-w-7xl mx-auto text-center relative w-full">
                         {/* Tagline */}
                         <motion.p
                             initial={{ opacity: 0, y: 20 }}
                             animate={{ opacity: 1, y: 0 }}
                             transition={{ delay: 0.1 }}
-                            className="text-noir/60 text-sm sm:text-lg md:text-xl tracking-widest uppercase font-medium mb-2 sm:mb-4"
+                            className="text-noir/60 text-xs sm:text-lg md:text-lg lg:text-xl tracking-widest uppercase font-medium mb-2 sm:mb-3 md:mb-4"
                         >
                             Every size. Every source. One search.
                         </motion.p>
@@ -143,7 +143,7 @@ export default function Home() {
                             initial={{ opacity: 0, y: 20 }}
                             animate={{ opacity: 1, y: 0 }}
                             transition={{ delay: 0.15 }}
-                            className="font-display text-4xl sm:text-6xl md:text-8xl lg:text-[10rem] leading-[0.85] tracking-tight text-noir"
+                            className="font-display text-[4.5rem] sm:text-7xl md:text-7xl lg:text-8xl xl:text-[10rem] leading-[0.8] sm:leading-[0.85] tracking-tight text-noir"
                         >
                             STOP <span className="text-cherry">OVERPAYING</span>
                         </motion.h1>
@@ -152,14 +152,14 @@ export default function Home() {
                             initial={{ opacity: 0, y: 20 }}
                             animate={{ opacity: 1, y: 0 }}
                             transition={{ delay: 0.2 }}
-                            className="font-display text-4xl sm:text-6xl md:text-8xl lg:text-[10rem] leading-[0.85] tracking-tight text-noir"
+                            className="font-display text-[4.5rem] sm:text-7xl md:text-7xl lg:text-8xl xl:text-[10rem] leading-[0.8] sm:leading-[0.85] tracking-tight text-noir"
                         >
                             FOR <span className="text-cherry">KICKS</span>
                         </motion.h1>
 
                         {/* 3D Shoe Model - Below text, overlapping */}
-                        <div className="relative -mt-12 sm:-mt-24 md:-mt-32 lg:-mt-40">
-                            <div className="relative h-[220px] sm:h-[350px] md:h-[420px] lg:h-[500px] pointer-events-auto overflow-visible">
+                        <div className="relative -mt-6 sm:-mt-20 md:-mt-24 lg:-mt-32 xl:-mt-40">
+                            <div className="relative h-[320px] sm:h-[350px] md:h-[350px] lg:h-[420px] xl:h-[500px] pointer-events-auto overflow-visible">
                                 <Suspense fallback={null}>
                                     <ShoeModel mousePosition={mousePosition} />
                                 </Suspense>

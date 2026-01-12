@@ -13,7 +13,7 @@
 
 # Production
 /build
-dist/
+**/dist/
 
 # TypeScript build output
 vite.config.js
