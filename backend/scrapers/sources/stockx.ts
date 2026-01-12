@@ -37,7 +37,7 @@ function generateStockXImageUrl(slug: string): string {
  * Extract image URL from DOM, or generate it
  * Prioritizes highest quality images (3x from srcset)
  */
-function getImageUrl($tile: cheerio.Cheerio<cheerio.AnyNode>, slug: string): string {
+function getImageUrl($tile: cheerio.Cheerio<any>, slug: string): string {
     const $img = $tile.find("img").first();
 
     // Priority 1: Try srcset - extract 3x version (highest quality)
