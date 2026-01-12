@@ -1,128 +1,47 @@
-# KickStar 👟🇨🇦
+# KickRax 👟
 
-Canada's sneaker price comparison platform. Compare prices across 10+ verified resellers to find the best deals on sneakers.
+**Stop overpaying for kicks.**
 
-## Tech Stack
+KickRax is a sneaker price comparison platform that helps you find the best deals across multiple verified resellers. Search once, compare prices everywhere.
 
-- **Frontend**: React + Vite + TypeScript
-- **Backend**: Express + Node.js
-- **Styling**: Tailwind CSS + Framer Motion
-- **Database**: MongoDB (optional, for 1-minute caching)
-- **Scrapers**: Cheerio + Axios
+## What is KickRax?
+
+Finding the best price on sneakers is exhausting. You have to check StockX, then GOAT, then Flight Club, then Stadium Goods... and prices vary wildly between them.
+
+KickRax does the work for you. Enter a sneaker name or style code, and we'll show you prices from all major platforms side-by-side, for every size available.
 
 ## Features
 
-- 🔍 Search across 10+ verified resellers simultaneously
-- 💰 All prices in CAD for easy comparison
-- 🛡️ Only verified/authenticated sellers (no scammers)
-- 🇨🇦 Focus on Canadian sneaker community
-- ⚡ Fast 1-minute caching with MongoDB
-- 📱 Beautiful, responsive UI
+- 🔍 **One Search, All Sources** — Compare prices across StockX, GOAT, Flight Club, Stadium Goods, and KicksCrew simultaneously
+- 📊 **Size-by-Size Comparison** — See which retailer has the best price for your specific size
+- 💰 **Prices in CAD** — All prices converted to Canadian dollars for easy comparison
+- 🛡️ **Verified Sellers Only** — We only scrape from authenticated, trusted platforms
+- ⚡ **Real-Time Data** — Prices are fetched live, so you always see current availability
+- 📱 **Mobile Friendly** — Works great on your phone with accelerometer-reactive 3D model
 
-## Verified Sources
+## Supported Platforms
 
-**Global Platforms:**
-- StockX (authenticated)
-- GOAT (authenticated)
-- Flight Club (authenticated)
-- Stadium Goods (authenticated)
-- Grailed (verified)
+| Platform | Type |
+|----------|------|
+| StockX | Authenticated Marketplace |
+| GOAT | Authenticated Marketplace |
+| Flight Club | Authenticated Retailer |
+| Stadium Goods | Authenticated Retailer |
+| KicksCrew | Verified Retailer |
 
-**Canadian Retailers:**
-- Livestock (Deadstock.ca) 🇨🇦
-- Haven 🇨🇦
-- Capsule Toronto 🇨🇦
-- Exclucity 🇨🇦
-- NRML 🇨🇦
+## How It Works
 
-## Getting Started
+1. **Search** — Enter a sneaker name (e.g., "Jordan 4 Black Cat") or style ID
+2. **Browse** — See all matching products with images and details
+3. **Compare** — Click a product to see prices from all sources, broken down by size
+4. **Buy** — Click the best price to go directly to that retailer's product page
 
-### Option 1: Docker (Recommended) 🐳
+## Why KickRax?
 
-The easiest way to run the app - no setup required!
+- **Save Money** — Price differences of $50-$200+ are common between platforms
+- **Save Time** — No more opening 5 tabs and searching each site manually
+- **Stay Informed** — See at a glance which sizes are available where
 
-```bash
-# Clone the repo
-git clone https://github.com/gigabite-pro/kickstar.git
-cd kickstar
+---
 
-# Build and run with Docker
-docker-compose up --build
-```
-
-That's it! The app will be running at:
-- Frontend: http://localhost:5173
-- Backend API: http://localhost:3001
-
-To stop: `docker-compose down`
-
-### Option 2: Local Development
-
-#### Prerequisites
-
-- Node.js 18+
-- npm or yarn
-- MongoDB (optional, for caching)
-
-#### Installation
-
-```bash
-# Clone the repo
-git clone https://github.com/gigabite-pro/kickstar.git
-cd kickstar
-
-# Install dependencies
-npm install
-
-# Create environment file (optional, for MongoDB)
-cp .env.example .env
-# Edit .env with your MongoDB credentials
-
-# Start development servers
-npm run dev
-```
-
-This runs:
-- Frontend at http://localhost:5173
-- Backend at http://localhost:3001
-
-### Environment Variables
-
-Create a `.env` file with:
-
-```
-MONGODB_URI=your_mongodb_connection_string
-MONGODB_DB=kickstar
-```
-
-MongoDB is optional - the app works without it, but caching will be disabled.
-
-## Project Structure
-
-```
-kickstar/
-├── src/                  # Frontend (React + Vite)
-│   ├── components/       # React components
-│   ├── pages/           # Page components
-│   ├── types.ts         # TypeScript types
-│   └── main.tsx         # Entry point
-├── server/              # Backend (Express)
-│   ├── scrapers/        # Web scrapers
-│   ├── db/              # MongoDB connection
-│   └── index.ts         # Express server
-└── package.json
-```
-
-## Scripts
-
-```bash
-npm run dev          # Start both frontend and backend
-npm run dev:frontend # Start only Vite frontend
-npm run dev:backend  # Start only Express backend
-npm run build        # Build for production
-npm run preview      # Preview production build
-```
-
-## License
-
-MIT
+Made with ❤️ for sneakerheads who hate overpaying.
