@@ -118,8 +118,20 @@ export async function searchStockXCatalog(query?: string, sort?: string): Promis
         const browserInstance = await getBrowser();
         page = await browserInstance.newPage();
 
-        // Set realistic viewport and user agent
-        await page.setViewport({ width: 1920, height: 1080 });
+        // Block unnecessary resources to speed up loading
+        await page.setRequestInterception(true);
+        page.on('request', (req) => {
+            const resourceType = req.resourceType();
+            // Block images, fonts, stylesheets, media - we only need HTML
+            if (['image', 'font', 'stylesheet', 'media'].includes(resourceType)) {
+                req.abort();
+            } else {
+                req.continue();
+            }
+        });
+
+        // Smaller viewport for faster rendering
+        await page.setViewport({ width: 1280, height: 800 });
         
         // Randomize user agent slightly
         const chromeVersions = ['120', '121', '122', '123', '124'];
@@ -133,47 +145,37 @@ export async function searchStockXCatalog(query?: string, sort?: string): Promis
             window.chrome = { runtime: {} };
         });
 
-        // Navigate to search page with shorter timeout
+        // Navigate to search page
         await page.goto(searchUrl, {
-            waitUntil: "domcontentloaded", // Faster than networkidle2
-            timeout: 20000,
+            waitUntil: "domcontentloaded",
+            timeout: 15000,
         });
-        
-        // Small random delay to seem more human
-        await new Promise(resolve => setTimeout(resolve, 500 + Math.random() * 1000));
 
         // Wait for product tiles to load
         try {
-            await page.waitForSelector('[data-testid="ProductTile"]', { timeout: 10000 });
+            await page.waitForSelector('[data-testid="ProductTile"]', { timeout: 8000 });
             console.log("[StockX] Product tiles loaded");
         } catch (e) {
             console.log("[StockX] ProductTile selector not found, trying alternative...");
-            // Wait a bit more for content to render
-            await new Promise((resolve) => setTimeout(resolve, 2000));
+            await new Promise((resolve) => setTimeout(resolve, 1000));
         }
 
-        // Scroll multiple times to trigger lazy loading of more products
-        const scrollIterations = 5;
+        // Scroll to trigger lazy loading - reduced iterations for speed
+        const scrollIterations = 3;
         console.log(`[StockX] Scrolling ${scrollIterations} times to load products...`);
         
         for (let i = 0; i < scrollIterations; i++) {
             await page.evaluate((scrollIndex) => {
                 window.scrollTo(0, (scrollIndex + 1) * window.innerHeight);
             }, i);
-            await new Promise((resolve) => setTimeout(resolve, 800));
+            await new Promise((resolve) => setTimeout(resolve, 400));
         }
         
         // Final scroll to bottom
         await page.evaluate(() => {
             window.scrollTo(0, document.body.scrollHeight);
         });
-        await new Promise((resolve) => setTimeout(resolve, 1000));
-
-        // Scroll back up to ensure all images are loaded
-        await page.evaluate(() => {
-            window.scrollTo(0, 0);
-        });
-        await new Promise((resolve) => setTimeout(resolve, 300));
+        await new Promise((resolve) => setTimeout(resolve, 500));
 
         // Get the rendered HTML
         const html = await page.content();

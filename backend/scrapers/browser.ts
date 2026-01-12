@@ -22,6 +22,16 @@ export function getPuppeteerOptions() {
             "--disable-blink-features=AutomationControlled",
             "--disable-dev-shm-usage", // Important for Docker
             "--disable-gpu",
+            "--disable-extensions",
+            "--disable-background-networking",
+            "--disable-sync",
+            "--disable-translate",
+            "--no-first-run",
+            "--disable-infobars",
+            "--disable-features=site-per-process",
+            "--single-process", // Reduce memory on low-resource servers
+            "--disable-web-security",
+            "--disable-features=IsolateOrigins,site-per-process",
         ],
     };
 }
