@@ -50,12 +50,11 @@ function Shoe({ mousePosition, deviceOrientation }: ShoeProps) {
         }
     });
 
-    // Scale based on viewport: larger on desktop, bigger on mobile
+    // Scale based on viewport: original desktop size, bigger on mobile
     const getScale = () => {
-        if (viewport.width > 8) return 11; // Large desktop
-        if (viewport.width > 6) return 10; // Desktop
+        if (viewport.width > 6) return 10; // Desktop (original)
         if (viewport.width > 4) return 9;  // Tablet
-        return 9; // Mobile - same as tablet for bigger appearance
+        return 9; // Mobile
     };
 
     // Position: centered on mobile, offset on desktop

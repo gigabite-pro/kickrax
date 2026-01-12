@@ -126,8 +126,8 @@ export default function Home() {
                 <Header onSearch={handleSearch} isLoading={isLoading} />
 
                 {/* Hero with 3D Model */}
-                <section className="h-screen min-h-[600px] pt-28 md:pt-20 px-4 sm:px-6 relative flex flex-col items-center justify-center overflow-hidden">
-                    <div className="max-w-7xl mx-auto text-center relative w-full">
+                <section className="h-screen min-h-[600px] pt-16 px-4 sm:px-6 relative flex flex-col items-center justify-center overflow-hidden">
+                    <div className="max-w-7xl mx-auto text-center relative w-full mt-16 sm:mt-12 md:mt-8 lg:mt-4">
                         {/* Tagline */}
                         <motion.p
                             initial={{ opacity: 0, y: 20 }}
