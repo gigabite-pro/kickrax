@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useCallback, useRef, ReactNode } from 'react';
+import { createContext, useContext, useState, useCallback, ReactNode } from 'react';
 import { CatalogProduct } from '../types';
 import { api } from '../lib/api';
 
@@ -10,27 +10,44 @@ interface TrendingContextType {
 
 const TrendingContext = createContext<TrendingContextType | null>(null);
 
+// Module-level cache to persist across StrictMode remounts and navigation
+let cachedTrending: CatalogProduct[] | null = null;
+let isFetching = false;
+
 export function TrendingProvider({ children }: { children: ReactNode }) {
-  const [trending, setTrending] = useState<CatalogProduct[]>([]);
+  const [trending, setTrending] = useState<CatalogProduct[]>(cachedTrending || []);
   const [trendingLoading, setTrendingLoading] = useState(false);
-  const hasFetchedRef = useRef(false);
 
   const fetchTrending = useCallback(async () => {
-    // Use ref to prevent duplicate fetches
-    if (hasFetchedRef.current) return;
-    hasFetchedRef.current = true;
+    // If we already have cached data, use it
+    if (cachedTrending && cachedTrending.length > 0) {
+      console.log('[TrendingContext] Using cached trending data, count:', cachedTrending.length);
+      setTrending(cachedTrending);
+      return;
+    }
+    
+    // Prevent duplicate fetches
+    if (isFetching) {
+      console.log('[TrendingContext] Already fetching, skipping...');
+      return;
+    }
+    isFetching = true;
 
+    console.log('[TrendingContext] Fetching trending data...');
     setTrendingLoading(true);
     try {
       const response = await fetch(api("/api/trending"));
       if (!response.ok) throw new Error("Failed to fetch trending");
       const data = await response.json();
-      setTrending(data.products || []);
+      console.log('[TrendingContext] Fetched trending products:', data.products?.length || 0);
+      const products = data.products || [];
+      cachedTrending = products;
+      setTrending(products);
     } catch (err) {
       console.error("Trending fetch error:", err);
-      hasFetchedRef.current = false; // Allow retry on error
     } finally {
       setTrendingLoading(false);
+      isFetching = false;
     }
   }, []);
 

@@ -411,18 +411,38 @@ export async function getProductStyleId(productUrl: string): Promise<string | nu
  */
 export async function getProductDataWithPrices(productUrl: string, signal?: AbortSignal): Promise<StockXProductData> {
     const browser = await launchBrowser();
+    let page = null;
 
     try {
         checkAbort(signal, 'STOCKX');
-        const page = await createPage(browser);
+        page = await createPage(browser);
 
         console.log(`[StockX] Loading product page: ${productUrl}`);
 
         checkAbort(signal, 'STOCKX');
-        await page.goto(productUrl, {
-            waitUntil: "networkidle2",
-            timeout: 30000,
-        });
+        
+        // Retry navigation up to 2 times to handle transient frame detachment
+        let lastError: Error | null = null;
+        for (let attempt = 1; attempt <= 2; attempt++) {
+            try {
+                await page.goto(productUrl, {
+                    waitUntil: "networkidle2",
+                    timeout: 30000,
+                });
+                lastError = null;
+                break;
+            } catch (err) {
+                lastError = err as Error;
+                if (attempt < 2 && lastError.message.includes('frame was detached')) {
+                    console.log(`[StockX] Navigation failed (attempt ${attempt}), retrying...`);
+                    await page.close().catch(() => {});
+                    page = await createPage(browser);
+                    await new Promise(r => setTimeout(r, 1000));
+                } else {
+                    throw lastError;
+                }
+            }
+        }
 
         checkAbort(signal, 'STOCKX');
         // Wait for the product traits section to load

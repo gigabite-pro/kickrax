@@ -12,27 +12,31 @@ export interface AbortSignal {
  */
 export function getPuppeteerOptions() {
     const executablePath = process.env.PUPPETEER_EXECUTABLE_PATH;
+    const isDocker = !!executablePath;
+    
+    const args = [
+        "--no-sandbox",
+        "--disable-setuid-sandbox",
+        "--disable-blink-features=AutomationControlled",
+        "--disable-dev-shm-usage",
+        "--disable-gpu",
+        "--disable-extensions",
+        "--disable-background-networking",
+        "--disable-sync",
+        "--disable-translate",
+        "--no-first-run",
+        "--disable-infobars",
+    ];
+    
+    // Only use single-process in Docker with limited resources
+    if (isDocker) {
+        args.push("--single-process");
+    }
     
     return {
         headless: true,
         executablePath: executablePath || undefined,
-        args: [
-            "--no-sandbox",
-            "--disable-setuid-sandbox",
-            "--disable-blink-features=AutomationControlled",
-            "--disable-dev-shm-usage", // Important for Docker
-            "--disable-gpu",
-            "--disable-extensions",
-            "--disable-background-networking",
-            "--disable-sync",
-            "--disable-translate",
-            "--no-first-run",
-            "--disable-infobars",
-            "--disable-features=site-per-process",
-            "--single-process", // Reduce memory on low-resource servers
-            "--disable-web-security",
-            "--disable-features=IsolateOrigins,site-per-process",
-        ],
+        args,
     };
 }
 
