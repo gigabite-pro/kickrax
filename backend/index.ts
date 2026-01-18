@@ -1,11 +1,28 @@
+/**
+ * KickRax API Server (Render)
+ *
+ * Main API server that handles all public endpoints.
+ * - Serves cached data when available
+ * - Calls Fly.io scraper service when scraping is needed
+ * - No Puppeteer/browser logic here
+ */
+
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
-import { searchStockXCatalog, getProductStyleId, getProductDataWithPrices, StockXProductData } from "./scrapers/sources/stockx.js";
-import { searchGoatBySku } from "./scrapers/sources/goat.js";
-import { searchKickscrewBySku } from "./scrapers/sources/kickscrew.js";
-import { searchFlightClubBySku } from "./scrapers/sources/flight-club.js";
-import { searchStadiumGoodsBySku } from "./scrapers/sources/stadiumgoods.js";
+import { getCachedTrending, setCachedTrending, isRedisConfigured } from "./cache/redis.js";
+import {
+    scrapeTrending,
+    scrapeSearch,
+    scrapeStockXProduct,
+    scrapeGoat,
+    scrapeKickscrew,
+    scrapeFlightclub,
+    scrapeStadiumgoods,
+    scrapeAllPrices,
+    isScraperConfigured,
+    getScraperUrl,
+} from "./lib/scraper-client.js";
 
 dotenv.config();
 
@@ -15,13 +32,100 @@ const PORT = process.env.PORT || 3001;
 app.use(cors());
 app.use(express.json());
 
-// Health check
+// ============================================================================
+// HEALTH & STATUS
+// ============================================================================
+
 app.get("/api/health", (req, res) => {
-    res.json({ status: "ok", timestamp: new Date().toISOString() });
+    res.json({
+        status: "ok",
+        service: "kickrax-api",
+        timestamp: new Date().toISOString(),
+        config: {
+            redis: isRedisConfigured(),
+            scraper: isScraperConfigured(),
+            scraperUrl: isScraperConfigured() ? getScraperUrl() : null,
+        },
+    });
 });
 
+// ============================================================================
+// TRENDING API (with Redis cache)
+// ============================================================================
+
 /**
- * Search API - Returns StockX results only (max 50 products)
+ * Get trending sneakers
+ * - Returns cached data if available
+ * - Calls Fly.io scraper if cache miss
+ */
+app.get("/api/trending", async (req, res) => {
+    const startTime = Date.now();
+    const forceRefresh = req.query.refresh === "true";
+
+    try {
+        // Check cache first (unless force refresh)
+        if (!forceRefresh) {
+            const cached = await getCachedTrending();
+            if (cached) {
+                const duration = Date.now() - startTime;
+                console.log(`[API] Trending cache HIT (${cached.products.length} products, ${duration}ms)`);
+
+                return res.json({
+                    products: cached.products,
+                    meta: {
+                        total: cached.products.length,
+                        timestamp: new Date().toISOString(),
+                        cached: true,
+                        cachedAt: cached.cachedAt,
+                        expiresAt: cached.expiresAt,
+                        duration,
+                    },
+                });
+            }
+        }
+
+        // Cache miss - call Fly.io scraper
+        console.log(`[API] Trending cache MISS, calling scraper...`);
+        const products = await scrapeTrending();
+        const duration = Date.now() - startTime;
+
+        if (products.length === 0) {
+            return res.status(503).json({
+                error: "Scraper unavailable",
+                message: "Could not fetch trending data. Please try again later.",
+            });
+        }
+
+        // Cache the results
+        await setCachedTrending(products);
+
+        console.log(`[API] Trending scraped and cached (${products.length} products, ${duration}ms)`);
+
+        res.json({
+            products,
+            meta: {
+                total: products.length,
+                timestamp: new Date().toISOString(),
+                cached: false,
+                duration,
+            },
+        });
+    } catch (error) {
+        console.error("[API] Trending error:", error);
+        res.status(500).json({
+            error: "Failed to fetch trending",
+            message: error instanceof Error ? error.message : "Unknown error",
+        });
+    }
+});
+
+// ============================================================================
+// SEARCH API
+// ============================================================================
+
+/**
+ * Search sneakers
+ * - Calls Fly.io scraper directly (search results aren't cached)
  */
 app.get("/api/search", async (req, res) => {
     const query = req.query.q as string;
@@ -34,10 +138,8 @@ app.get("/api/search", async (req, res) => {
     const startTime = Date.now();
 
     try {
-        console.log(`[API] Searching StockX for: ${normalizedQuery}`);
-
-        // Get products from StockX (max 50)
-        const products = await searchStockXCatalog(normalizedQuery);
+        console.log(`[API] Searching for: ${normalizedQuery}`);
+        const products = await scrapeSearch(normalizedQuery);
         const duration = Date.now() - startTime;
 
         console.log(`[API] Found ${products.length} products in ${duration}ms`);
@@ -48,10 +150,11 @@ app.get("/api/search", async (req, res) => {
             meta: {
                 total: products.length,
                 timestamp: new Date().toISOString(),
+                duration,
             },
         });
     } catch (error) {
-        console.error("Search API error:", error);
+        console.error("[API] Search error:", error);
         res.status(500).json({
             error: "Failed to search",
             message: error instanceof Error ? error.message : "Unknown error",
@@ -59,39 +162,12 @@ app.get("/api/search", async (req, res) => {
     }
 });
 
-/**
- * Trending API - Returns most active sneakers from StockX
- */
-app.get("/api/trending", async (req, res) => {
-    const startTime = Date.now();
-
-    try {
-        console.log(`[API] Fetching trending sneakers`);
-
-        // Get trending products (most-active sort)
-        const products = await searchStockXCatalog(undefined, 'most-active');
-        const duration = Date.now() - startTime;
-
-        console.log(`[API] Found ${products.length} trending products in ${duration}ms`);
-
-        res.json({
-            products,
-            meta: {
-                total: products.length,
-                timestamp: new Date().toISOString(),
-            },
-        });
-    } catch (error) {
-        console.error("Trending API error:", error);
-        res.status(500).json({
-            error: "Failed to fetch trending",
-            message: error instanceof Error ? error.message : "Unknown error",
-        });
-    }
-});
+// ============================================================================
+// PRODUCT DETAILS API
+// ============================================================================
 
 /**
- * Get Style ID AND prices from a StockX product page
+ * Get StockX product style ID and prices
  */
 app.get("/api/product/style", async (req, res) => {
     const url = req.query.url as string;
@@ -100,261 +176,139 @@ app.get("/api/product/style", async (req, res) => {
         return res.status(400).json({ error: "Valid StockX URL required" });
     }
 
-    const signal = { aborted: false };
-    req.on('close', () => {
-        if (!res.writableEnded) {
-            signal.aborted = true;
-            console.log(`[API] Style ID request aborted for: ${url}`);
-        }
-    });
+    const startTime = Date.now();
 
     try {
-        console.log(`[API] Getting Style ID and prices from: ${url}`);
-        const productData = await getProductDataWithPrices(url, signal);
+        console.log(`[API] Getting product data from: ${url}`);
+        const productData = await scrapeStockXProduct(url);
+        const duration = Date.now() - startTime;
 
-        if (signal.aborted) return;
+        if (!productData) {
+            return res.status(503).json({
+                error: "Scraper unavailable",
+                message: "Could not fetch product data. Please try again later.",
+            });
+        }
 
-        console.log(`[API] Style ID: ${productData.styleId}, Sizes: ${productData.sizes.length}`);
+        console.log(`[API] Style ID: ${productData.styleId}, Sizes: ${productData.sizes.length}, ${duration}ms`);
 
         res.json({
             url,
             styleId: productData.styleId,
             stockxPrices: productData,
             timestamp: new Date().toISOString(),
+            duration,
         });
     } catch (error) {
-        if (signal.aborted) return;
-        console.error("Style ID API error:", error);
+        console.error("[API] Product style error:", error);
         res.status(500).json({
-            error: "Failed to get Style ID",
+            error: "Failed to get product data",
             message: error instanceof Error ? error.message : "Unknown error",
         });
     }
 });
 
-/**
- * Search GOAT + KicksCrew + FlightClub by SKU and get all size prices
- */
-app.get("/api/goat/prices", async (req, res) => {
-    const sku = req.query.sku as string;
+// ============================================================================
+// PRICE APIs (individual sources)
+// ============================================================================
 
-    if (!sku || sku.trim().length < 3) {
-        return res.status(400).json({ error: "Valid SKU required (at least 3 characters)" });
-    }
-
-    const startTime = Date.now();
-
-    try {
-        console.log(`[API] Fetching prices for SKU: ${sku}`);
-
-        // Fetch from all sources in parallel
-        const [goatResult, kickscrewResult, flightClubResult, stadiumGoodsResult] = await Promise.all([
-            searchGoatBySku(sku),
-            searchKickscrewBySku(sku),
-            searchFlightClubBySku(sku),
-            searchStadiumGoodsBySku(sku),
-        ]);
-
-        const duration = Date.now() - startTime;
-
-        // Print all sizes from each source
-        console.log(`\n========== RESULTS FOR SKU: ${sku} (${duration}ms) ==========`);
-
-        if (goatResult?.sizes?.length) {
-            console.log(`\n[GOAT] ${goatResult.sizes.length} sizes:`);
-            console.log(`  ${goatResult.sizes.map((s) => `${s.size}=$${s.priceCAD}`).join(", ")}`);
-        } else {
-            console.log(`\n[GOAT] No sizes found`);
-        }
-
-        if (kickscrewResult?.sizes?.length) {
-            console.log(`\n[KICKSCREW] ${kickscrewResult.sizes.length} sizes:`);
-            console.log(`  ${kickscrewResult.sizes.map((s) => `${s.size}=$${s.priceCAD}`).join(", ")}`);
-        } else {
-            console.log(`\n[KICKSCREW] No sizes found`);
-        }
-
-        if (flightClubResult?.sizes?.length) {
-            console.log(`\n[FLIGHTCLUB] ${flightClubResult.sizes.length} sizes:`);
-            console.log(`  ${flightClubResult.sizes.map((s) => `${s.size}=$${s.priceCAD}`).join(", ")}`);
-        } else {
-            console.log(`\n[FLIGHTCLUB] No sizes found`);
-        }
-
-        if (stadiumGoodsResult?.sizes?.length) {
-            console.log(`\n[STADIUMGOODS] ${stadiumGoodsResult.sizes.length} sizes:`);
-            console.log(`  ${stadiumGoodsResult.sizes.map((s) => `${s.size}=$${s.price}`).join(", ")}`);
-        } else {
-            console.log(`\n[STADIUMGOODS] No sizes found`);
-        }
-
-        console.log(`\n====================================================\n`);
-
-        res.json({
-            sku,
-            goat: goatResult,
-            kickscrew: kickscrewResult,
-            flightclub: flightClubResult,
-            stadiumgoods: stadiumGoodsResult,
-            meta: {
-                duration,
-                timestamp: new Date().toISOString(),
-            },
-        });
-    } catch (error) {
-        console.error("Prices API error:", error);
-        res.status(500).json({
-            error: "Failed to fetch prices",
-            message: error instanceof Error ? error.message : "Unknown error",
-        });
-    }
-});
-
-/**
- * Individual source endpoints - for progressive loading
- */
-
-// GOAT prices
 app.get("/api/prices/goat", async (req, res) => {
     const sku = req.query.sku as string;
     if (!sku || sku.trim().length < 3) {
         return res.status(400).json({ error: "Valid SKU required" });
     }
 
-    const signal = { aborted: false };
-    req.on('close', () => {
-        if (!res.writableEnded) {
-            signal.aborted = true;
-            console.log(`[GOAT] Request aborted for SKU: ${sku}`);
-        }
-    });
-
     const startTime = Date.now();
     try {
-        const result = await searchGoatBySku(sku, signal);
-        if (signal.aborted) return;
+        const result = await scrapeGoat(sku);
         const duration = Date.now() - startTime;
         res.json({ source: "goat", sku, data: result, duration });
     } catch (error) {
-        if (!signal.aborted) res.status(500).json({ source: "goat", error: "Failed to fetch" });
+        res.status(500).json({ source: "goat", error: "Failed to fetch" });
     }
 });
 
-// KicksCrew prices
 app.get("/api/prices/kickscrew", async (req, res) => {
     const sku = req.query.sku as string;
     if (!sku || sku.trim().length < 3) {
         return res.status(400).json({ error: "Valid SKU required" });
     }
 
-    const signal = { aborted: false };
-    req.on('close', () => {
-        if (!res.writableEnded) {
-            signal.aborted = true;
-            console.log(`[KICKSCREW] Request aborted for SKU: ${sku}`);
-        }
-    });
-
     const startTime = Date.now();
     try {
-        const result = await searchKickscrewBySku(sku, signal);
-        if (signal.aborted) return;
+        const result = await scrapeKickscrew(sku);
         const duration = Date.now() - startTime;
         res.json({ source: "kickscrew", sku, data: result, duration });
     } catch (error) {
-        if (!signal.aborted) res.status(500).json({ source: "kickscrew", error: "Failed to fetch" });
+        res.status(500).json({ source: "kickscrew", error: "Failed to fetch" });
     }
 });
 
-// Flight Club prices
 app.get("/api/prices/flightclub", async (req, res) => {
     const sku = req.query.sku as string;
     if (!sku || sku.trim().length < 3) {
         return res.status(400).json({ error: "Valid SKU required" });
     }
 
-    const signal = { aborted: false };
-    req.on('close', () => {
-        if (!res.writableEnded) {
-            signal.aborted = true;
-            console.log(`[FLIGHTCLUB] Request aborted for SKU: ${sku}`);
-        }
-    });
-
     const startTime = Date.now();
     try {
-        const result = await searchFlightClubBySku(sku, signal);
-        if (signal.aborted) return;
+        const result = await scrapeFlightclub(sku);
         const duration = Date.now() - startTime;
         res.json({ source: "flightclub", sku, data: result, duration });
     } catch (error) {
-        if (!signal.aborted) res.status(500).json({ source: "flightclub", error: "Failed to fetch" });
+        res.status(500).json({ source: "flightclub", error: "Failed to fetch" });
     }
 });
 
-// Stadium Goods prices
 app.get("/api/prices/stadiumgoods", async (req, res) => {
     const sku = req.query.sku as string;
     if (!sku || sku.trim().length < 3) {
         return res.status(400).json({ error: "Valid SKU required" });
     }
 
-    const signal = { aborted: false };
-    req.on('close', () => {
-        if (!res.writableEnded) {
-            signal.aborted = true;
-            console.log(`[STADIUMGOODS] Request aborted for SKU: ${sku}`);
-        }
-    });
-
     const startTime = Date.now();
     try {
-        const result = await searchStadiumGoodsBySku(sku, signal);
-        if (signal.aborted) return;
+        const result = await scrapeStadiumgoods(sku);
         const duration = Date.now() - startTime;
         res.json({ source: "stadiumgoods", sku, data: result, duration });
     } catch (error) {
-        if (!signal.aborted) res.status(500).json({ source: "stadiumgoods", error: "Failed to fetch" });
+        res.status(500).json({ source: "stadiumgoods", error: "Failed to fetch" });
     }
 });
 
-// StockX prices (uses URL instead of SKU since we need to be on the page)
 app.get("/api/prices/stockx", async (req, res) => {
     const url = req.query.url as string;
     if (!url || !url.includes("stockx.com")) {
         return res.status(400).json({ error: "Valid StockX URL required" });
     }
 
-    const signal = { aborted: false };
-    req.on('close', () => {
-        if (!res.writableEnded) {
-            signal.aborted = true;
-            console.log(`[STOCKX] Request aborted for URL: ${url}`);
-        }
-    });
-
     const startTime = Date.now();
     try {
-        const result = await getProductDataWithPrices(url, signal);
-        if (signal.aborted) return;
+        const result = await scrapeStockXProduct(url);
         const duration = Date.now() - startTime;
-        res.json({ 
-            source: "stockx", 
-            data: {
-                productName: result.productName,
-                productUrl: result.productUrl,
-                imageUrl: result.imageUrl,
-                sizes: result.sizes,
-            }, 
-            duration 
+        res.json({
+            source: "stockx",
+            data: result
+                ? {
+                      productName: result.productName,
+                      productUrl: result.productUrl,
+                      imageUrl: result.imageUrl,
+                      sizes: result.sizes,
+                  }
+                : null,
+            duration,
         });
     } catch (error) {
-        if (!signal.aborted) res.status(500).json({ source: "stockx", error: "Failed to fetch" });
+        res.status(500).json({ source: "stockx", error: "Failed to fetch" });
     }
 });
 
+// ============================================================================
+// ALL PRICES API
+// ============================================================================
+
 /**
- * Get prices from all sources (GOAT + KicksCrew + FlightClub) by SKU
+ * Get prices from all sources by SKU
  */
 app.get("/api/prices", async (req, res) => {
     const sku = req.query.sku as string;
@@ -366,64 +320,25 @@ app.get("/api/prices", async (req, res) => {
     const startTime = Date.now();
 
     try {
-        console.log(`[API] Fetching prices from all sources for SKU: ${sku}`);
-
-        // Fetch from all sources in parallel
-        const [goatResult, kickscrewResult, flightClubResult, stadiumGoodsResult] = await Promise.all([
-            searchGoatBySku(sku),
-            searchKickscrewBySku(sku),
-            searchFlightClubBySku(sku),
-            searchStadiumGoodsBySku(sku),
-        ]);
-
+        console.log(`[API] Fetching all prices for SKU: ${sku}`);
+        const prices = await scrapeAllPrices(sku);
         const duration = Date.now() - startTime;
 
-        // Print all sizes from each source
-        console.log(`\n========== ALL SOURCES - SKU: ${sku} (${duration}ms) ==========`);
-
-        if (goatResult?.sizes?.length) {
-            console.log(`\n[GOAT] ${goatResult.sizes.length} sizes:`);
-            console.log(`  ${goatResult.sizes.map((s) => `${s.size}=$${s.priceCAD}`).join(", ")}`);
-        } else {
-            console.log(`\n[GOAT] No sizes found`);
-        }
-
-        if (kickscrewResult?.sizes?.length) {
-            console.log(`\n[KICKSCREW] ${kickscrewResult.sizes.length} sizes:`);
-            console.log(`  ${kickscrewResult.sizes.map((s) => `${s.size}=$${s.priceCAD}`).join(", ")}`);
-        } else {
-            console.log(`\n[KICKSCREW] No sizes found`);
-        }
-
-        if (flightClubResult?.sizes?.length) {
-            console.log(`\n[FLIGHTCLUB] ${flightClubResult.sizes.length} sizes:`);
-            console.log(`  ${flightClubResult.sizes.map((s) => `${s.size}=$${s.priceCAD}`).join(", ")}`);
-        } else {
-            console.log(`\n[FLIGHTCLUB] No sizes found`);
-        }
-
-        if (stadiumGoodsResult?.sizes?.length) {
-            console.log(`\n[STADIUMGOODS] ${stadiumGoodsResult.sizes.length} sizes:`);
-            console.log(`  ${stadiumGoodsResult.sizes.map((s) => `${s.size}=$${s.price}`).join(", ")}`);
-        } else {
-            console.log(`\n[STADIUMGOODS] No sizes found`);
-        }
-
-        console.log(`\n====================================================\n`);
+        console.log(`[API] All prices fetched in ${duration}ms`);
 
         res.json({
             sku,
-            goat: goatResult,
-            kickscrew: kickscrewResult,
-            flightclub: flightClubResult,
-            stadiumgoods: stadiumGoodsResult,
+            goat: prices.goat,
+            kickscrew: prices.kickscrew,
+            flightclub: prices.flightclub,
+            stadiumgoods: prices.stadiumgoods,
             meta: {
                 duration,
                 timestamp: new Date().toISOString(),
             },
         });
     } catch (error) {
-        console.error("Prices API error:", error);
+        console.error("[API] Prices error:", error);
         res.status(500).json({
             error: "Failed to fetch prices",
             message: error instanceof Error ? error.message : "Unknown error",
@@ -431,13 +346,58 @@ app.get("/api/prices", async (req, res) => {
     }
 });
 
+/**
+ * Legacy endpoint - redirects to /api/prices
+ */
+app.get("/api/goat/prices", async (req, res) => {
+    const sku = req.query.sku as string;
+
+    if (!sku || sku.trim().length < 3) {
+        return res.status(400).json({ error: "Valid SKU required (at least 3 characters)" });
+    }
+
+    const startTime = Date.now();
+
+    try {
+        console.log(`[API] Fetching all prices for SKU: ${sku}`);
+        const prices = await scrapeAllPrices(sku);
+        const duration = Date.now() - startTime;
+
+        res.json({
+            sku,
+            goat: prices.goat,
+            kickscrew: prices.kickscrew,
+            flightclub: prices.flightclub,
+            stadiumgoods: prices.stadiumgoods,
+            meta: {
+                duration,
+                timestamp: new Date().toISOString(),
+            },
+        });
+    } catch (error) {
+        console.error("[API] Prices error:", error);
+        res.status(500).json({
+            error: "Failed to fetch prices",
+            message: error instanceof Error ? error.message : "Unknown error",
+        });
+    }
+});
+
+// ============================================================================
+// START SERVER
+// ============================================================================
+
 app.listen(PORT, () => {
-    console.log(`🚀 Server running on http://localhost:${PORT}`);
+    console.log(`🚀 KickRax API running on http://localhost:${PORT}`);
+    console.log(`\nConfiguration:`);
+    console.log(`  Redis: ${isRedisConfigured() ? "✓ Connected" : "✗ Not configured"}`);
+    console.log(`  Scraper: ${isScraperConfigured() ? `✓ ${getScraperUrl()}` : "✗ Not configured"}`);
     console.log(`\nEndpoints:`);
-    console.log(`  GET /api/search?q=jordan+1        - Search StockX`);
-    console.log(`  GET /api/product/style?url=...    - Get Style ID from product page`);
-    console.log(`  GET /api/goat/prices?sku=...      - Get GOAT prices by SKU`);
-    console.log(`  GET /api/kickscrew/prices?sku=... - Get KicksCrew prices by SKU`);
-    console.log(`  GET /api/prices?sku=...           - Get all prices by SKU`);
-    console.log(`  GET /api/health                   - Health check`);
+    console.log(`  GET /api/health               - Health check`);
+    console.log(`  GET /api/trending             - Trending (cached)`);
+    console.log(`  GET /api/search?q=...         - Search`);
+    console.log(`  GET /api/product/style?url=...  - StockX product`);
+    console.log(`  GET /api/prices?sku=...       - All sources`);
+    console.log(`  GET /api/prices/goat?sku=...  - GOAT only`);
+    console.log(`  GET /api/prices/stockx?url=...  - StockX only`);
 });
