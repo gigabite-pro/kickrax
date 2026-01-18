@@ -128,7 +128,7 @@ app.get("/api/trending", async (req, res) => {
  * - Calls Fly.io scraper directly (search results aren't cached)
  */
 app.get("/api/search", async (req, res) => {
-    const query = req.query.q as string;
+    const query = req.query.q;
 
     if (!query || query.trim().length < 2) {
         return res.status(400).json({ error: "Search query must be at least 2 characters" });
@@ -170,7 +170,7 @@ app.get("/api/search", async (req, res) => {
  * Get StockX product style ID and prices
  */
 app.get("/api/product/style", async (req, res) => {
-    const url = req.query.url as string;
+    const url = req.query.url;
 
     if (!url || !url.includes("stockx.com")) {
         return res.status(400).json({ error: "Valid StockX URL required" });
@@ -213,7 +213,7 @@ app.get("/api/product/style", async (req, res) => {
 // ============================================================================
 
 app.get("/api/prices/goat", async (req, res) => {
-    const sku = req.query.sku as string;
+    const sku = req.query.sku;
     if (!sku || sku.trim().length < 3) {
         return res.status(400).json({ error: "Valid SKU required" });
     }
@@ -229,7 +229,7 @@ app.get("/api/prices/goat", async (req, res) => {
 });
 
 app.get("/api/prices/kickscrew", async (req, res) => {
-    const sku = req.query.sku as string;
+    const sku = req.query.sku;
     if (!sku || sku.trim().length < 3) {
         return res.status(400).json({ error: "Valid SKU required" });
     }
@@ -245,7 +245,7 @@ app.get("/api/prices/kickscrew", async (req, res) => {
 });
 
 app.get("/api/prices/flightclub", async (req, res) => {
-    const sku = req.query.sku as string;
+    const sku = req.query.sku;
     if (!sku || sku.trim().length < 3) {
         return res.status(400).json({ error: "Valid SKU required" });
     }
@@ -261,7 +261,7 @@ app.get("/api/prices/flightclub", async (req, res) => {
 });
 
 app.get("/api/prices/stadiumgoods", async (req, res) => {
-    const sku = req.query.sku as string;
+    const sku = req.query.sku;
     if (!sku || sku.trim().length < 3) {
         return res.status(400).json({ error: "Valid SKU required" });
     }
@@ -277,7 +277,7 @@ app.get("/api/prices/stadiumgoods", async (req, res) => {
 });
 
 app.get("/api/prices/stockx", async (req, res) => {
-    const url = req.query.url as string;
+    const url = req.query.url;
     if (!url || !url.includes("stockx.com")) {
         return res.status(400).json({ error: "Valid StockX URL required" });
     }
@@ -311,7 +311,7 @@ app.get("/api/prices/stockx", async (req, res) => {
  * Get prices from all sources by SKU
  */
 app.get("/api/prices", async (req, res) => {
-    const sku = req.query.sku as string;
+    const sku = req.query.sku;
 
     if (!sku || sku.trim().length < 3) {
         return res.status(400).json({ error: "Valid SKU required (at least 3 characters)" });
@@ -350,7 +350,7 @@ app.get("/api/prices", async (req, res) => {
  * Legacy endpoint - redirects to /api/prices
  */
 app.get("/api/goat/prices", async (req, res) => {
-    const sku = req.query.sku as string;
+    const sku = req.query.sku;
 
     if (!sku || sku.trim().length < 3) {
         return res.status(400).json({ error: "Valid SKU required (at least 3 characters)" });

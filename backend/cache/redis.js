@@ -1,10 +1,9 @@
 import { Redis } from "@upstash/redis";
-import { CatalogProduct } from "../types.js";
 
 // Initialize Redis client (uses UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN env vars)
-let redis: Redis | null = null;
+let redis = null;
 
-function getRedis(): Redis | null {
+function getRedis() {
     if (redis) return redis;
 
     const url = process.env.UPSTASH_REDIS_REST_URL;
@@ -25,22 +24,16 @@ function getRedis(): Redis | null {
 const TRENDING_CACHE_KEY = "kickrax:trending";
 const TRENDING_CACHE_TTL = 30 * 60; // 30 minutes in seconds
 
-export interface CachedTrending {
-    products: CatalogProduct[];
-    cachedAt: string;
-    expiresAt: string;
-}
-
 /**
  * Get trending products from cache
  * Returns null if not cached or expired
  */
-export async function getCachedTrending(): Promise<CachedTrending | null> {
+export async function getCachedTrending() {
     const client = getRedis();
     if (!client) return null;
 
     try {
-        const cached = await client.get<CachedTrending>(TRENDING_CACHE_KEY);
+        const cached = await client.get(TRENDING_CACHE_KEY);
         if (cached) {
             console.log(`[CACHE] Trending cache HIT (${cached.products.length} products, cached at ${cached.cachedAt})`);
             return cached;
@@ -56,7 +49,7 @@ export async function getCachedTrending(): Promise<CachedTrending | null> {
 /**
  * Store trending products in cache
  */
-export async function setCachedTrending(products: CatalogProduct[]): Promise<boolean> {
+export async function setCachedTrending(products) {
     const client = getRedis();
     if (!client) return false;
 
@@ -64,7 +57,7 @@ export async function setCachedTrending(products: CatalogProduct[]): Promise<boo
         const now = new Date();
         const expiresAt = new Date(now.getTime() + TRENDING_CACHE_TTL * 1000);
 
-        const cacheData: CachedTrending = {
+        const cacheData = {
             products,
             cachedAt: now.toISOString(),
             expiresAt: expiresAt.toISOString(),
@@ -82,7 +75,7 @@ export async function setCachedTrending(products: CatalogProduct[]): Promise<boo
 /**
  * Invalidate trending cache (for manual refresh)
  */
-export async function invalidateTrendingCache(): Promise<boolean> {
+export async function invalidateTrendingCache() {
     const client = getRedis();
     if (!client) return false;
 
@@ -99,6 +92,6 @@ export async function invalidateTrendingCache(): Promise<boolean> {
 /**
  * Check if Redis is available
  */
-export function isRedisConfigured(): boolean {
+export function isRedisConfigured() {
     return !!(process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN);
 }

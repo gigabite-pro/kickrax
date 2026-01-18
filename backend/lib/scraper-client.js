@@ -5,8 +5,6 @@
  * Used by the Render API when scraping is needed (cache miss).
  */
 
-import { CatalogProduct } from "../types.js";
-
 // Scraper service configuration
 // Default to localhost for development, set SCRAPER_URL for production
 const SCRAPER_URL = process.env.SCRAPER_URL || "http://localhost:3000";
@@ -21,22 +19,10 @@ console.log(`[SCRAPER-CLIENT] URL: ${SCRAPER_URL}`);
 // Timeout for scraper requests (scraping can take a while)
 const SCRAPER_TIMEOUT = 60000; // 60 seconds
 
-interface ScraperResponse<T> {
-    success: boolean;
-    data?: T;
-    products?: CatalogProduct[];
-    error?: string;
-    meta?: {
-        duration: number;
-        count?: number;
-        timestamp: string;
-    };
-}
-
 /**
  * Call the Fly.io scraper service
  */
-async function callScraper<T>(endpoint: string, params?: Record<string, string>): Promise<ScraperResponse<T>> {
+async function callScraper(endpoint, params) {
     const url = new URL(endpoint, SCRAPER_URL);
     
     if (params) {
@@ -45,7 +31,7 @@ async function callScraper<T>(endpoint: string, params?: Record<string, string>)
         });
     }
 
-    const headers: Record<string, string> = {
+    const headers = {
         "Content-Type": "application/json",
     };
 
@@ -76,7 +62,7 @@ async function callScraper<T>(endpoint: string, params?: Record<string, string>)
             };
         }
 
-        const data = await response.json() as ScraperResponse<T>;
+        const data = await response.json();
         console.log(`[SCRAPER-CLIENT] Success (${data.meta?.duration || 0}ms)`);
         return data;
     } catch (error) {
@@ -98,8 +84,8 @@ async function callScraper<T>(endpoint: string, params?: Record<string, string>)
 /**
  * Scrape trending products from StockX
  */
-export async function scrapeTrending(): Promise<CatalogProduct[]> {
-    const response = await callScraper<CatalogProduct[]>("/scrape/trending");
+export async function scrapeTrending() {
+    const response = await callScraper("/scrape/trending");
     
     if (!response.success || !response.products) {
         console.error(`[SCRAPER-CLIENT] Trending scrape failed: ${response.error}`);
@@ -112,8 +98,8 @@ export async function scrapeTrending(): Promise<CatalogProduct[]> {
 /**
  * Scrape search results from StockX
  */
-export async function scrapeSearch(query: string): Promise<CatalogProduct[]> {
-    const response = await callScraper<CatalogProduct[]>("/scrape/search", { q: query });
+export async function scrapeSearch(query) {
+    const response = await callScraper("/scrape/search", { q: query });
     
     if (!response.success || !response.products) {
         console.error(`[SCRAPER-CLIENT] Search scrape failed: ${response.error}`);
@@ -126,16 +112,8 @@ export async function scrapeSearch(query: string): Promise<CatalogProduct[]> {
 /**
  * Scrape StockX product page
  */
-export interface StockXProductData {
-    styleId: string | null;
-    productName: string;
-    productUrl: string;
-    imageUrl: string;
-    sizes: { size: string; price: number; priceCAD: number }[];
-}
-
-export async function scrapeStockXProduct(url: string): Promise<StockXProductData | null> {
-    const response = await callScraper<StockXProductData>("/scrape/stockx/product", { url });
+export async function scrapeStockXProduct(url) {
+    const response = await callScraper("/scrape/stockx/product", { url });
     
     if (!response.success || !response.data) {
         console.error(`[SCRAPER-CLIENT] StockX product scrape failed: ${response.error}`);
@@ -148,15 +126,8 @@ export async function scrapeStockXProduct(url: string): Promise<StockXProductDat
 /**
  * Scrape GOAT prices by SKU
  */
-export interface SourcePricing {
-    productName: string;
-    productUrl: string;
-    imageUrl: string;
-    sizes: { size: string; price: number; priceCAD: number }[];
-}
-
-export async function scrapeGoat(sku: string): Promise<SourcePricing | null> {
-    const response = await callScraper<SourcePricing>("/scrape/goat", { sku });
+export async function scrapeGoat(sku) {
+    const response = await callScraper("/scrape/goat", { sku });
     
     if (!response.success) {
         console.error(`[SCRAPER-CLIENT] GOAT scrape failed: ${response.error}`);
@@ -169,8 +140,8 @@ export async function scrapeGoat(sku: string): Promise<SourcePricing | null> {
 /**
  * Scrape KicksCrew prices by SKU
  */
-export async function scrapeKickscrew(sku: string): Promise<SourcePricing | null> {
-    const response = await callScraper<SourcePricing>("/scrape/kickscrew", { sku });
+export async function scrapeKickscrew(sku) {
+    const response = await callScraper("/scrape/kickscrew", { sku });
     
     if (!response.success) {
         console.error(`[SCRAPER-CLIENT] KicksCrew scrape failed: ${response.error}`);
@@ -183,8 +154,8 @@ export async function scrapeKickscrew(sku: string): Promise<SourcePricing | null
 /**
  * Scrape FlightClub prices by SKU
  */
-export async function scrapeFlightclub(sku: string): Promise<SourcePricing | null> {
-    const response = await callScraper<SourcePricing>("/scrape/flightclub", { sku });
+export async function scrapeFlightclub(sku) {
+    const response = await callScraper("/scrape/flightclub", { sku });
     
     if (!response.success) {
         console.error(`[SCRAPER-CLIENT] FlightClub scrape failed: ${response.error}`);
@@ -197,8 +168,8 @@ export async function scrapeFlightclub(sku: string): Promise<SourcePricing | nul
 /**
  * Scrape StadiumGoods prices by SKU
  */
-export async function scrapeStadiumgoods(sku: string): Promise<SourcePricing | null> {
-    const response = await callScraper<SourcePricing>("/scrape/stadiumgoods", { sku });
+export async function scrapeStadiumgoods(sku) {
+    const response = await callScraper("/scrape/stadiumgoods", { sku });
     
     if (!response.success) {
         console.error(`[SCRAPER-CLIENT] StadiumGoods scrape failed: ${response.error}`);
@@ -211,15 +182,8 @@ export async function scrapeStadiumgoods(sku: string): Promise<SourcePricing | n
 /**
  * Scrape all price sources by SKU
  */
-export interface AllPricesData {
-    goat: SourcePricing | null;
-    kickscrew: SourcePricing | null;
-    flightclub: SourcePricing | null;
-    stadiumgoods: SourcePricing | null;
-}
-
-export async function scrapeAllPrices(sku: string): Promise<AllPricesData> {
-    const response = await callScraper<AllPricesData>("/scrape/prices", { sku });
+export async function scrapeAllPrices(sku) {
+    const response = await callScraper("/scrape/prices", { sku });
     
     if (!response.success || !response.data) {
         console.error(`[SCRAPER-CLIENT] All prices scrape failed: ${response.error}`);
@@ -237,13 +201,13 @@ export async function scrapeAllPrices(sku: string): Promise<AllPricesData> {
 /**
  * Check if scraper service is configured
  */
-export function isScraperConfigured(): boolean {
+export function isScraperConfigured() {
     return !!process.env.SCRAPER_URL;
 }
 
 /**
  * Get scraper service URL (for debugging)
  */
-export function getScraperUrl(): string {
+export function getScraperUrl() {
     return SCRAPER_URL;
 }
