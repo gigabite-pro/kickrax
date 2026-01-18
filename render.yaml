@@ -1,13 +1,22 @@
 services:
   - type: web
     name: kickrax-api
-    runtime: docker
+    runtime: node
     region: oregon
     rootDir: backend
-    dockerfilePath: ./Dockerfile
+    buildCommand: npm install && npm run build
+    startCommand: npm start
     envVars:
       - key: NODE_ENV
         value: production
       - key: PORT
         value: "3001"
+      - key: SCRAPER_URL
+        sync: false
+      - key: SCRAPER_API_KEY
+        sync: false
+      - key: UPSTASH_REDIS_REST_URL
+        sync: false
+      - key: UPSTASH_REDIS_REST_TOKEN
+        sync: false
     healthCheckPath: /api/health
