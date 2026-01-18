@@ -76,7 +76,7 @@ async function callScraper<T>(endpoint: string, params?: Record<string, string>)
             };
         }
 
-        const data = await response.json();
+        const data = await response.json() as ScraperResponse<T>;
         console.log(`[SCRAPER-CLIENT] Success (${data.meta?.duration || 0}ms)`);
         return data;
     } catch (error) {
