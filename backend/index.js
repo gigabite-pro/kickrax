@@ -15,10 +15,6 @@ import {
     scrapeTrending,
     scrapeSearch,
     scrapeStockXProduct,
-    scrapeGoat,
-    scrapeKickscrew,
-    scrapeFlightclub,
-    scrapeStadiumgoods,
     scrapeAllPrices,
     isScraperConfigured,
     getScraperUrl,
@@ -28,6 +24,24 @@ dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 3001;
+
+// Request deduplication - prevents duplicate scraper calls from React StrictMode
+const pendingRequests = new Map();
+
+function dedupeRequest(key, fn) {
+    if (pendingRequests.has(key)) {
+        console.log(`[DEDUPE] Reusing pending request for: ${key}`);
+        return pendingRequests.get(key);
+    }
+    
+    const promise = fn().finally(() => {
+        // Clear after a short delay to handle rapid duplicate calls
+        setTimeout(() => pendingRequests.delete(key), 100);
+    });
+    
+    pendingRequests.set(key, promise);
+    return promise;
+}
 
 app.use(cors());
 app.use(express.json());
@@ -177,10 +191,13 @@ app.get("/api/product/style", async (req, res) => {
     }
 
     const startTime = Date.now();
+    const dedupeKey = `stockx-product:${url}`;
 
     try {
         console.log(`[API] Getting product data from: ${url}`);
-        const productData = await scrapeStockXProduct(url);
+        
+        // Dedupe identical requests (React StrictMode)
+        const productData = await dedupeRequest(dedupeKey, () => scrapeStockXProduct(url));
         const duration = Date.now() - startTime;
 
         if (!productData) {
@@ -209,8 +226,14 @@ app.get("/api/product/style", async (req, res) => {
 });
 
 // ============================================================================
-// PRICE APIs (individual sources)
+// PRICE APIs (individual sources - all use combined scraper call)
 // ============================================================================
+
+// Helper: get all prices once, return specific source
+async function getPricesForSource(sku, source) {
+    const allPrices = await scrapeAllPrices(sku);
+    return allPrices[source] || null;
+}
 
 app.get("/api/prices/goat", async (req, res) => {
     const sku = req.query.sku;
@@ -220,7 +243,7 @@ app.get("/api/prices/goat", async (req, res) => {
 
     const startTime = Date.now();
     try {
-        const result = await scrapeGoat(sku);
+        const result = await getPricesForSource(sku, "goat");
         const duration = Date.now() - startTime;
         res.json({ source: "goat", sku, data: result, duration });
     } catch (error) {
@@ -236,7 +259,7 @@ app.get("/api/prices/kickscrew", async (req, res) => {
 
     const startTime = Date.now();
     try {
-        const result = await scrapeKickscrew(sku);
+        const result = await getPricesForSource(sku, "kickscrew");
         const duration = Date.now() - startTime;
         res.json({ source: "kickscrew", sku, data: result, duration });
     } catch (error) {
@@ -252,7 +275,7 @@ app.get("/api/prices/flightclub", async (req, res) => {
 
     const startTime = Date.now();
     try {
-        const result = await scrapeFlightclub(sku);
+        const result = await getPricesForSource(sku, "flightclub");
         const duration = Date.now() - startTime;
         res.json({ source: "flightclub", sku, data: result, duration });
     } catch (error) {
@@ -268,7 +291,7 @@ app.get("/api/prices/stadiumgoods", async (req, res) => {
 
     const startTime = Date.now();
     try {
-        const result = await scrapeStadiumgoods(sku);
+        const result = await getPricesForSource(sku, "stadiumgoods");
         const duration = Date.now() - startTime;
         res.json({ source: "stadiumgoods", sku, data: result, duration });
     } catch (error) {
@@ -318,10 +341,13 @@ app.get("/api/prices", async (req, res) => {
     }
 
     const startTime = Date.now();
+    const dedupeKey = `all-prices:${sku}`;
 
     try {
         console.log(`[API] Fetching all prices for SKU: ${sku}`);
-        const prices = await scrapeAllPrices(sku);
+        
+        // Dedupe identical requests (React StrictMode)
+        const prices = await dedupeRequest(dedupeKey, () => scrapeAllPrices(sku));
         const duration = Date.now() - startTime;
 
         console.log(`[API] All prices fetched in ${duration}ms`);

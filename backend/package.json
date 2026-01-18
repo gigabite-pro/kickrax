@@ -5,6 +5,8 @@
     "type": "module",
     "scripts": {
         "dev": "node --watch index.js",
+        "dev:fly": "SCRAPER_URL=https://kickrax-scraper.fly.dev SCRAPER_API_KEY=$SCRAPER_API_KEY node --watch index.js",
+        "dev:local": "SCRAPER_URL=http://localhost:3000 node --watch index.js",
         "start": "node index.js"
     },
     "engines": {

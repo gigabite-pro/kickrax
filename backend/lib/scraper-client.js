@@ -124,63 +124,7 @@ export async function scrapeStockXProduct(url) {
 }
 
 /**
- * Scrape GOAT prices by SKU
- */
-export async function scrapeGoat(sku) {
-    const response = await callScraper("/scrape/goat", { sku });
-    
-    if (!response.success) {
-        console.error(`[SCRAPER-CLIENT] GOAT scrape failed: ${response.error}`);
-        return null;
-    }
-
-    return response.data || null;
-}
-
-/**
- * Scrape KicksCrew prices by SKU
- */
-export async function scrapeKickscrew(sku) {
-    const response = await callScraper("/scrape/kickscrew", { sku });
-    
-    if (!response.success) {
-        console.error(`[SCRAPER-CLIENT] KicksCrew scrape failed: ${response.error}`);
-        return null;
-    }
-
-    return response.data || null;
-}
-
-/**
- * Scrape FlightClub prices by SKU
- */
-export async function scrapeFlightclub(sku) {
-    const response = await callScraper("/scrape/flightclub", { sku });
-    
-    if (!response.success) {
-        console.error(`[SCRAPER-CLIENT] FlightClub scrape failed: ${response.error}`);
-        return null;
-    }
-
-    return response.data || null;
-}
-
-/**
- * Scrape StadiumGoods prices by SKU
- */
-export async function scrapeStadiumgoods(sku) {
-    const response = await callScraper("/scrape/stadiumgoods", { sku });
-    
-    if (!response.success) {
-        console.error(`[SCRAPER-CLIENT] StadiumGoods scrape failed: ${response.error}`);
-        return null;
-    }
-
-    return response.data || null;
-}
-
-/**
- * Scrape all price sources by SKU
+ * Scrape all price sources by SKU (single request, scraper handles all sources)
  */
 export async function scrapeAllPrices(sku) {
     const response = await callScraper("/scrape/prices", { sku });
