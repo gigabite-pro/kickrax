@@ -1,50 +1,32 @@
-import type { Page } from "puppeteer";
-import * as cheerio from "cheerio";
-import { SOURCES, SneakerListing, SourcePricing, SizePrice } from "../../types.js";
-import { ScraperResult, convertToCAD, generateListingId, USD_TO_CAD_RATE } from "../types.js";
-import { launchBrowser, createPage, AbortSignal, checkAbort, sleepWithAbort } from "../browser.js";
-
-export interface GoatSizePricing {
-    productName: string;
-    productUrl: string;
-    imageUrl: string;
-    sizes: { size: string; price: number; priceCAD: number }[];
-}
-
+import { SOURCES } from "../../types.js";
+import { generateListingId, USD_TO_CAD_RATE } from "../types.js";
+import { launchBrowser, createPage, checkAbort, sleepWithAbort } from "../browser.js";
 /**
  * Scrape GOAT by SKU using an existing page. Does not close page/browser.
  */
-export async function scrapeGoatBySkuInPage(page: Page, sku: string, signal?: AbortSignal): Promise<GoatSizePricing | null> {
+export async function scrapeGoatBySkuInPage(page, sku, signal) {
     console.log(`[GOAT] Searching for SKU: ${sku}`);
-
     try {
         checkAbort(signal, "GOAT");
-
         await page.setExtraHTTPHeaders({
             "Accept-Language": "en-CA,en;q=0.9",
             Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
         });
-
         // Step 1: Search GOAT
         const searchUrl = `https://www.goat.com/en-ca/search?query=${encodeURIComponent(sku)}&pageNumber=1`;
-
         checkAbort(signal, 'GOAT');
         await page.goto(searchUrl, { waitUntil: "networkidle2", timeout: 30000 });
         await sleepWithAbort(2000, signal, 'GOAT');
-
         // Step 2: Find product link
         const skuLower = sku.toLowerCase().replace(/-/g, "");
-
         const productUrl = await page.evaluate((skuLower) => {
             const links = Array.from(document.querySelectorAll('a[href*="/sneakers/"]'));
-
             for (const link of links) {
                 const href = link.getAttribute("href") || "";
                 if (href.toLowerCase().replace(/-/g, "").includes(skuLower)) {
                     return href.startsWith("http") ? href : `https://www.goat.com${href}`;
                 }
             }
-
             const gridCards = Array.from(document.querySelectorAll('[data-qa="grid_cell_product"], [class*="ProductCard"]'));
             for (const card of gridCards) {
                 const link = card.querySelector('a[href*="/sneakers/"]');
@@ -53,7 +35,6 @@ export async function scrapeGoatBySkuInPage(page: Page, sku: string, signal?: Ab
                     return href.startsWith("http") ? href : `https://www.goat.com${href}`;
                 }
             }
-
             const mainContent = document.querySelector('main, [class*="SearchResults"]');
             if (mainContent) {
                 const link = mainContent.querySelector('a[href*="/sneakers/"]');
@@ -62,36 +43,30 @@ export async function scrapeGoatBySkuInPage(page: Page, sku: string, signal?: Ab
                     return href.startsWith("http") ? href : `https://www.goat.com${href}`;
                 }
             }
-
             return null;
         }, skuLower);
-
         if (!productUrl) {
             console.log("[GOAT] No product found");
             return null;
         }
-
         console.log(`[GOAT] Found: ${productUrl}`);
-
         // Step 3: Navigate to product page
         checkAbort(signal, 'GOAT');
         await page.goto(productUrl, { waitUntil: "networkidle2", timeout: 30000 });
         await sleepWithAbort(2000, signal, 'GOAT');
-
         // Scroll to trigger lazy loading
         for (let i = 0; i < 3; i++) {
             checkAbort(signal, 'GOAT');
             await page.evaluate((scrollAmount) => window.scrollBy(0, scrollAmount), 300);
             await sleepWithAbort(300, signal, 'GOAT');
         }
-
         checkAbort(signal, 'GOAT');
         await page.evaluate(() => {
             const buyBar = document.querySelector('[data-qa="buy_bar_desktop"]');
-            if (buyBar) buyBar.scrollIntoView({ behavior: "instant", block: "center" });
+            if (buyBar)
+                buyBar.scrollIntoView({ behavior: "instant", block: "center" });
         });
         await sleepWithAbort(1500, signal, 'GOAT');
-
         // Try clicking swiper
         try {
             checkAbort(signal, 'GOAT');
@@ -100,45 +75,39 @@ export async function scrapeGoatBySkuInPage(page: Page, sku: string, signal?: Ab
                 await swiperWrapper.click();
                 await sleepWithAbort(1000, signal, 'GOAT');
             }
-        } catch (e) {
-            if (e instanceof Error && e.message === 'ABORTED') throw e;
         }
-
+        catch (e) {
+            if (e instanceof Error && e.message === 'ABORTED')
+                throw e;
+        }
         // Wait for size items
         try {
             await page.waitForSelector('[data-qa="buy_bar_item_desktop"]', { timeout: 5000 });
-        } catch (e) {}
-
+        }
+        catch (e) { }
         // Extract sizes
         const extractedData = await page.evaluate(() => {
             const items = document.querySelectorAll('[data-qa="buy_bar_item_desktop"]');
-            const sizes: { size: string; price: string | null }[] = [];
-            const seen = new Set<string>();
-
+            const sizes = [];
+            const seen = new Set();
             items.forEach((item) => {
                 const sizeEl = item.querySelector('[data-qa^="buy_bar_size_"]');
                 const priceEl = item.querySelector('[data-qa^="buy_bar_price_size_"]');
                 const oosEl = item.querySelector('[data-qa="buy_bar_oos"]');
-
                 const sizeText = sizeEl?.textContent?.trim() || "";
                 const priceText = priceEl?.textContent?.trim() || null;
                 const isOOS = !!oosEl;
-
                 if (sizeText && !seen.has(sizeText)) {
                     seen.add(sizeText);
                     sizes.push({ size: sizeText, price: isOOS ? null : priceText });
                 }
             });
-
             const productName = document.querySelector('h1[data-qa="product_display_name"]')?.textContent?.trim() || document.querySelector("h1")?.textContent?.trim() || "Unknown Product";
-            const imageEl = document.querySelector('[data-qa="grid_cell_product_image"] img') as HTMLImageElement | null;
-
+            const imageEl = document.querySelector('[data-qa="grid_cell_product_image"] img');
             return { productName, imageUrl: imageEl?.src || "", sizes, itemCount: items.length };
         });
-
         // Convert to our format
-        const sizes: { size: string; price: number; priceCAD: number }[] = [];
-
+        const sizes = [];
         for (const item of extractedData.sizes) {
             if (item.price) {
                 const priceMatch = item.price.match(/C?\$?([\d,]+)/);
@@ -152,52 +121,48 @@ export async function scrapeGoatBySkuInPage(page: Page, sku: string, signal?: Ab
                 }
             }
         }
-
         sizes.sort((a, b) => parseFloat(a.size) - parseFloat(b.size));
-
         console.log(`[GOAT] Found ${sizes.length} sizes`);
         if (sizes.length > 0) {
             console.log(`[GOAT] Sizes: ${sizes.map((s) => `${s.size}=$${s.priceCAD}`).join(", ")}`);
         }
-
         return {
             productName: extractedData.productName,
             productUrl,
             imageUrl: extractedData.imageUrl,
             sizes,
         };
-    } catch (error) {
-        if (error instanceof Error && error.message === "ABORTED") throw error;
+    }
+    catch (error) {
+        if (error instanceof Error && error.message === "ABORTED")
+            throw error;
         console.error("[GOAT] Error:", error);
         return null;
     }
 }
-
 /**
  * Search GOAT by SKU (standalone: launches and closes browser).
  */
-export async function searchGoatBySku(sku: string, signal?: AbortSignal): Promise<GoatSizePricing | null> {
+export async function searchGoatBySku(sku, signal) {
     const browser = await launchBrowser();
     try {
         const page = await createPage(browser);
         return await scrapeGoatBySkuInPage(page, sku, signal);
-    } finally {
-        await browser.close().catch(() => {});
+    }
+    finally {
+        await browser.close().catch(() => { });
     }
 }
-
 /**
  * Legacy search function for backwards compatibility
  */
-export async function searchGOAT(query: string): Promise<ScraperResult> {
+export async function searchGOAT(query) {
     const source = SOURCES.goat;
     const result = await searchGoatBySku(query);
-
     if (!result || result.sizes.length === 0) {
         return { success: false, listings: [], source, error: "No results found" };
     }
-
-    const listings: SneakerListing[] = result.sizes.map((sizeData, index) => ({
+    const listings = result.sizes.map((sizeData, index) => ({
         id: generateListingId("goat", `${index}`),
         name: `${result.productName} - Size ${sizeData.size}`,
         brand: "Unknown",
@@ -205,39 +170,34 @@ export async function searchGOAT(query: string): Promise<ScraperResult> {
         sku: "",
         imageUrl: result.imageUrl,
         retailPrice: null,
-        condition: "new" as const,
+        condition: "new",
         source,
         price: sizeData.price,
-        currency: "USD" as const,
+        currency: "USD",
         priceCAD: sizeData.priceCAD,
         url: result.productUrl,
         lastUpdated: new Date(),
     }));
-
     return { success: true, listings, source };
 }
-
 /**
  * Search GOAT by SKU and return SourcePricing format
  */
-export async function searchGOATBySku(sku: string): Promise<SourcePricing> {
+export async function searchGOATBySku(sku) {
     const source = SOURCES.goat;
     const result = await searchGoatBySku(sku);
-
     if (!result || result.sizes.length === 0) {
         return { source, sizes: [], lowestPrice: 0, available: false };
     }
-
-    const sizes: SizePrice[] = result.sizes.map((s) => ({
+    const sizes = result.sizes.map((s) => ({
         size: s.size,
         price: s.price,
         priceCAD: s.priceCAD,
-        currency: "USD" as const,
+        currency: "USD",
         url: `${result.productUrl}?size=${s.size}`,
         available: true,
     }));
-
     const lowestPrice = Math.min(...sizes.map((s) => s.priceCAD));
-
     return { source, sizes, lowestPrice, available: true };
 }
+//# sourceMappingURL=goat.js.map

@@ -1,52 +1,44 @@
-import { CatalogProduct, ProductWithPrices, SourcePricing, SOURCES, SizePrice } from "../types.js";
+import { SOURCES } from "../types.js";
 import { searchStockXCatalog } from "./sources/stockx.js";
 import { searchGOATBySku } from "./sources/goat.js";
 import { searchKickscrewBySkuPricing } from "./sources/kickscrew.js";
 import { USD_TO_CAD_RATE, searchMockDB } from "./types.js";
-
 // Generate realistic size pricing
-function generateSizePricing(sourceId: string, basePrice: number, sku: string): SourcePricing {
+function generateSizePricing(sourceId, basePrice, sku) {
     const source = SOURCES[sourceId];
-    if (!source) return { source: SOURCES.stockx, sizes: [], lowestPrice: 0, available: false };
-
+    if (!source)
+        return { source: SOURCES.stockx, sizes: [], lowestPrice: 0, available: false };
     const sizes = ["7", "7.5", "8", "8.5", "9", "9.5", "10", "10.5", "11", "11.5", "12", "13"];
-
     // Price variations by source
-    const sourcePriceOffset: Record<string, number> = {
+    const sourcePriceOffset = {
         stockx: 0,
         goat: -20,
         "flight-club": 25,
     };
-
     const offset = sourcePriceOffset[sourceId] || 0;
-
-    const sizeData: SizePrice[] = sizes
+    const sizeData = sizes
         .filter(() => Math.random() > 0.1) // 90% availability
         .map((size) => {
-            const sizeNum = parseFloat(size);
-            // Larger sizes often cost more
-            const sizeMultiplier = sizeNum > 11 ? 1.15 : sizeNum < 8 ? 1.08 : 1;
-            // Random variation
-            const randomVariation = Math.floor(Math.random() * 40) - 20;
-            const price = Math.round((basePrice + offset + randomVariation) * sizeMultiplier);
-
-            // Determine currency based on source
-            const currency = sourceId === "stockx" ? "CAD" : "USD";
-            const priceCAD = currency === "CAD" ? price : Math.round(price * USD_TO_CAD_RATE);
-
-            return {
-                size,
-                price,
-                priceCAD,
-                currency: currency as "USD" | "CAD",
-                url: `${source.baseUrl}/search?s=${encodeURIComponent(sku)}&size=${size}`,
-                available: true,
-            };
-        })
+        const sizeNum = parseFloat(size);
+        // Larger sizes often cost more
+        const sizeMultiplier = sizeNum > 11 ? 1.15 : sizeNum < 8 ? 1.08 : 1;
+        // Random variation
+        const randomVariation = Math.floor(Math.random() * 40) - 20;
+        const price = Math.round((basePrice + offset + randomVariation) * sizeMultiplier);
+        // Determine currency based on source
+        const currency = sourceId === "stockx" ? "CAD" : "USD";
+        const priceCAD = currency === "CAD" ? price : Math.round(price * USD_TO_CAD_RATE);
+        return {
+            size,
+            price,
+            priceCAD,
+            currency: currency,
+            url: `${source.baseUrl}/search?s=${encodeURIComponent(sku)}&size=${size}`,
+            available: true,
+        };
+    })
         .sort((a, b) => parseFloat(a.size) - parseFloat(b.size));
-
     const lowestPrice = sizeData.length > 0 ? Math.min(...sizeData.map((s) => s.priceCAD)) : 0;
-
     return {
         source,
         sizes: sizeData,
@@ -54,64 +46,53 @@ function generateSizePricing(sourceId: string, basePrice: number, sku: string): 
         available: sizeData.length > 0,
     };
 }
-
 /**
  * Main search flow:
  * 1. Search StockX for products (get 20 results with SKUs)
  * 2. For each product, search other verified sites by SKU
  * 3. Aggregate all size-level pricing
  */
-export async function searchWithCrossReference(query: string): Promise<ProductWithPrices[]> {
+export async function searchWithCrossReference(query) {
     console.log(`[Search Flow] Starting search for: ${query}`);
-
     // Phase 1: Get catalog products from StockX (or mock if scraping fails)
-    let catalogProducts: CatalogProduct[] = [];
-
+    let catalogProducts = [];
     try {
         catalogProducts = await searchStockXCatalog(query);
-    } catch (error) {
+    }
+    catch (error) {
         console.log("[Search Flow] StockX scraping failed, using mock data");
     }
-
     // If no results from StockX, use mock data
     if (catalogProducts.length === 0) {
         console.log("[Search Flow] Using mock catalog data");
         catalogProducts = getMockCatalogProducts(query);
     }
-
     console.log(`[Search Flow] Found ${catalogProducts.length} products`);
-
     if (catalogProducts.length === 0) {
         return [];
     }
-
     // Phase 2: For each product, get pricing from all sources
-    const productPromises = catalogProducts.map(async (product): Promise<ProductWithPrices> => {
+    const productPromises = catalogProducts.map(async (product) => {
         const sku = product.sku;
         console.log(`[Search Flow] Cross-referencing: ${product.name} (${sku})`);
-
         // Try to get real data, fall back to mock
-        let goatPricing: SourcePricing;
-        let kickscrewPricing: SourcePricing;
-
+        let goatPricing;
+        let kickscrewPricing;
         try {
             [goatPricing, kickscrewPricing] = await Promise.all([searchGOATBySku(sku), searchKickscrewBySkuPricing(sku)]);
-        } catch (error) {
+        }
+        catch (error) {
             console.log(`[Search Flow] API calls failed for ${sku}, using mock data`);
             goatPricing = generateSizePricing("goat", product.stockxLowestAsk, sku);
             kickscrewPricing = generateSizePricing("kickscrew", product.stockxLowestAsk, sku);
         }
-
         // Generate StockX pricing (we have lowest ask, generate sizes)
         const stockxPricing = generateSizePricing("stockx", product.stockxLowestAsk, sku);
-
         // Combine all sources
-        const sources: SourcePricing[] = [stockxPricing, goatPricing, kickscrewPricing].filter((s) => s.available);
-
+        const sources = [stockxPricing, goatPricing, kickscrewPricing].filter((s) => s.available);
         // Find overall lowest price and best deal
         let lowestOverallPrice = Infinity;
-        let bestDeal: ProductWithPrices["bestDeal"] = null;
-
+        let bestDeal = null;
         for (const sourcePricing of sources) {
             for (const sizePrice of sourcePricing.sizes) {
                 if (sizePrice.priceCAD < lowestOverallPrice) {
@@ -125,7 +106,6 @@ export async function searchWithCrossReference(query: string): Promise<ProductWi
                 }
             }
         }
-
         return {
             product,
             sources,
@@ -133,20 +113,16 @@ export async function searchWithCrossReference(query: string): Promise<ProductWi
             bestDeal,
         };
     });
-
     // Wait for all products to complete
     const results = await Promise.all(productPromises);
-
     // Sort by lowest price
     return results.sort((a, b) => a.lowestOverallPrice - b.lowestOverallPrice);
 }
-
 /**
  * Get mock catalog products when scraping fails
  */
-function getMockCatalogProducts(query: string): CatalogProduct[] {
+function getMockCatalogProducts(query) {
     const matches = searchMockDB(query, 0);
-
     // If mock DB has matches, use those
     if (matches.length > 0) {
         return matches.map((product, index) => ({
@@ -161,7 +137,6 @@ function getMockCatalogProducts(query: string): CatalogProduct[] {
             stockxLowestAsk: product.priceCAD,
         }));
     }
-
     // Generic fallback for any search
     const genericProducts = [
         { name: `${query} - Style 1`, price: 180, sku: "STYLE-001" },
@@ -170,7 +145,6 @@ function getMockCatalogProducts(query: string): CatalogProduct[] {
         { name: `${query} - Retro`, price: 280, sku: "STYLE-RET" },
         { name: `${query} - OG`, price: 300, sku: "STYLE-OG" },
     ];
-
     return genericProducts.map((p, index) => ({
         id: `generic-${index}-${Date.now()}`,
         name: p.name,
@@ -183,32 +157,35 @@ function getMockCatalogProducts(query: string): CatalogProduct[] {
         stockxLowestAsk: p.price,
     }));
 }
-
-function extractBrand(query: string): string {
+function extractBrand(query) {
     const q = query.toLowerCase();
-    if (q.includes("jordan")) return "Jordan";
-    if (q.includes("nike") || q.includes("dunk") || q.includes("air force") || q.includes("air max")) return "Nike";
-    if (q.includes("adidas") || q.includes("yeezy") || q.includes("samba") || q.includes("campus")) return "Adidas";
-    if (q.includes("new balance") || q.includes("nb ") || q.includes("550") || q.includes("2002")) return "New Balance";
-    if (q.includes("puma")) return "Puma";
-    if (q.includes("converse")) return "Converse";
-    if (q.includes("vans")) return "Vans";
+    if (q.includes("jordan"))
+        return "Jordan";
+    if (q.includes("nike") || q.includes("dunk") || q.includes("air force") || q.includes("air max"))
+        return "Nike";
+    if (q.includes("adidas") || q.includes("yeezy") || q.includes("samba") || q.includes("campus"))
+        return "Adidas";
+    if (q.includes("new balance") || q.includes("nb ") || q.includes("550") || q.includes("2002"))
+        return "New Balance";
+    if (q.includes("puma"))
+        return "Puma";
+    if (q.includes("converse"))
+        return "Converse";
+    if (q.includes("vans"))
+        return "Vans";
     return "Unknown";
 }
-
-function getProductImage(name: string): string {
+function getProductImage(name) {
     // Return empty for now - could add placeholder images later
     return "";
 }
-
 /**
  * Get detailed pricing for a single product by SKU
  */
-export async function getProductPricing(sku: string, productName: string): Promise<ProductWithPrices | null> {
+export async function getProductPricing(sku, productName) {
     console.log(`[Product Pricing] Getting pricing for SKU: ${sku}`);
-
     // Create a placeholder product
-    const product: CatalogProduct = {
+    const product = {
         id: `sku-${sku}`,
         name: productName,
         brand: extractBrand(productName),
@@ -219,29 +196,23 @@ export async function getProductPricing(sku: string, productName: string): Promi
         stockxUrl: `https://stockx.com/search?s=${encodeURIComponent(sku)}`,
         stockxLowestAsk: 200,
     };
-
     // Get pricing from all sources
-    let goatPricing: SourcePricing;
-    let kickscrewPricing: SourcePricing;
-
+    let goatPricing;
+    let kickscrewPricing;
     try {
         [goatPricing, kickscrewPricing] = await Promise.all([searchGOATBySku(sku), searchKickscrewBySkuPricing(sku)]);
-    } catch (error) {
+    }
+    catch (error) {
         goatPricing = generateSizePricing("goat", 200, sku);
         kickscrewPricing = generateSizePricing("kickscrew", 200, sku);
     }
-
     const stockxPricing = generateSizePricing("stockx", 200, sku);
-
-    const sources: SourcePricing[] = [stockxPricing, goatPricing, kickscrewPricing].filter((s) => s.available);
-
+    const sources = [stockxPricing, goatPricing, kickscrewPricing].filter((s) => s.available);
     if (sources.length === 0) {
         return null;
     }
-
     let lowestOverallPrice = Infinity;
-    let bestDeal: ProductWithPrices["bestDeal"] = null;
-
+    let bestDeal = null;
     for (const sourcePricing of sources) {
         for (const sizePrice of sourcePricing.sizes) {
             if (sizePrice.priceCAD < lowestOverallPrice) {
@@ -255,7 +226,6 @@ export async function getProductPricing(sku: string, productName: string): Promi
             }
         }
     }
-
     return {
         product,
         sources,
@@ -263,3 +233,4 @@ export async function getProductPricing(sku: string, productName: string): Promi
         bestDeal,
     };
 }
+//# sourceMappingURL=search-flow.js.map

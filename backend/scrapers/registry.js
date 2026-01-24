@@ -1,17 +1,4 @@
-import { SourceSlug } from "../types.js";
-
-export interface ScraperConfig {
-    id: SourceSlug;
-    name: string;
-    type: "api" | "html";
-    baseUrl: string;
-    trustLevel: "verified" | "authenticated" | "marketplace";
-    rateLimit: { requests: number; windowMs: number };
-    enabled: boolean;
-    country: "US" | "CA" | "GLOBAL";
-}
-
-export const SCRAPER_REGISTRY: ScraperConfig[] = [
+export const SCRAPER_REGISTRY = [
     {
         id: "stockx",
         name: "StockX",
@@ -63,3 +50,4 @@ export const SCRAPER_REGISTRY: ScraperConfig[] = [
         country: "GLOBAL",
     },
 ];
+//# sourceMappingURL=registry.js.map

@@ -1,32 +1,27 @@
-import type { Browser } from "puppeteer";
 import { launchBrowser } from "./scrapers/browser.js";
-
-const IDLE_TIMEOUT_MS = 30_000; // 30 seconds
-
-let sessionBrowser: Browser | null = null;
-let idleTimer: ReturnType<typeof setTimeout> | null = null;
-
-function clearIdleTimer(): void {
+const IDLE_TIMEOUT_MS = 30000; // 30 seconds
+let sessionBrowser = null;
+let idleTimer = null;
+function clearIdleTimer() {
     if (idleTimer) {
         clearTimeout(idleTimer);
         idleTimer = null;
     }
 }
-
-async function releaseBrowser(): Promise<void> {
+async function releaseBrowser() {
     clearIdleTimer();
     if (sessionBrowser) {
         try {
             await sessionBrowser.close();
-        } catch (e) {
+        }
+        catch (e) {
             console.warn("[SearchSession] Error closing browser:", e);
         }
         sessionBrowser = null;
         console.log("[SearchSession] Browser released");
     }
 }
-
-function scheduleIdleClose(): void {
+function scheduleIdleClose() {
     clearIdleTimer();
     idleTimer = setTimeout(() => {
         idleTimer = null;
@@ -34,20 +29,18 @@ function scheduleIdleClose(): void {
         releaseBrowser();
     }, IDLE_TIMEOUT_MS);
 }
-
 /**
  * Get the current search-session browser, or null if none.
  */
-export function getSessionBrowser(): Browser | null {
+export function getSessionBrowser() {
     return sessionBrowser;
 }
-
 /**
  * Acquire a browser for product/prices flow. Cancels idle timer.
  * Returns existing session browser if still open, otherwise launches and stores one.
  * Call releaseSessionForProduct() when done.
  */
-export async function acquireBrowserForProduct(): Promise<Browser> {
+export async function acquireBrowserForProduct() {
     clearIdleTimer();
     if (sessionBrowser && sessionBrowser.isConnected()) {
         return sessionBrowser;
@@ -56,20 +49,18 @@ export async function acquireBrowserForProduct(): Promise<Browser> {
     console.log("[SearchSession] Browser acquired for product/prices");
     return sessionBrowser;
 }
-
 /**
  * Release the session browser (e.g. after product+all-prices flow).
  */
-export async function releaseSessionForProduct(): Promise<void> {
+export async function releaseSessionForProduct() {
     await releaseBrowser();
 }
-
 /**
  * Get or create the search-session browser, then run fn(browser).
  * Starts the 30s idle timer after fn returns (browser stays open).
  * Use for /api/search: fetch catalog, keep browser, start timer.
  */
-export async function withSearchSession<T>(fn: (browser: Browser) => Promise<T>): Promise<T> {
+export async function withSearchSession(fn) {
     if (!sessionBrowser || !sessionBrowser.isConnected()) {
         sessionBrowser = await launchBrowser();
         console.log("[SearchSession] Browser acquired for search");
@@ -78,3 +69,4 @@ export async function withSearchSession<T>(fn: (browser: Browser) => Promise<T>)
     scheduleIdleClose();
     return result;
 }
+//# sourceMappingURL=search-session.js.map

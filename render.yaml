@@ -4,7 +4,7 @@ services:
     runtime: node
     region: oregon
     rootDir: backend
-    buildCommand: npm install --include=dev && npm run build && node -e "require('fs').accessSync('dist/index.js')"
+    buildCommand: npm install
     startCommand: npm start
     envVars:
       - key: NODE_ENV
