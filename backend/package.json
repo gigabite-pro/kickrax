@@ -5,7 +5,7 @@
     "type": "module",
     "scripts": {
         "dev": "tsx watch index.ts",
-        "start": "npm run build && node dist/index.js",
+        "start": "npm install && npm run build && node dist/index.js",
         "build": "tsc"
     },
     "dependencies": {
