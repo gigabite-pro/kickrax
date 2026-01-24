@@ -1,13 +1,14 @@
+import "./load-env.js";
 import express from "express";
 import cors from "cors";
-import dotenv from "dotenv";
-import { searchStockXCatalog, getProductStyleId, getProductDataWithPrices, StockXProductData } from "./scrapers/sources/stockx.js";
-import { searchGoatBySku } from "./scrapers/sources/goat.js";
-import { searchKickscrewBySku } from "./scrapers/sources/kickscrew.js";
-import { searchFlightClubBySku } from "./scrapers/sources/flight-club.js";
-import { searchStadiumGoodsBySku } from "./scrapers/sources/stadiumgoods.js";
-
-dotenv.config();
+import { searchStockXCatalog, fetchStockXCatalogInBrowser, fetchStockXProductInPage, getProductStyleId, getProductDataWithPrices, StockXProductData } from "./scrapers/sources/stockx.js";
+import { searchGoatBySku, scrapeGoatBySkuInPage } from "./scrapers/sources/goat.js";
+import { searchKickscrewBySku, scrapeKickscrewBySkuInPage } from "./scrapers/sources/kickscrew.js";
+import { searchFlightClubBySku, scrapeFlightClubBySkuInPage } from "./scrapers/sources/flight-club.js";
+import { searchStadiumGoodsBySku, scrapeStadiumGoodsBySkuInPage } from "./scrapers/sources/stadiumgoods.js";
+import { withSearchSession, acquireBrowserForProduct, releaseSessionForProduct } from "./search-session.js";
+import { createPage, isBrowserlessConfigured } from "./scrapers/browser.js";
+import { getTrendingCache, setTrendingCache, isRedisConfigured } from "./db/redis.js";
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -21,7 +22,8 @@ app.get("/api/health", (req, res) => {
 });
 
 /**
- * Search API - Returns StockX results only (max 50 products)
+ * Search API - Returns StockX results only (max 50 products).
+ * Uses session browser; keeps it open 30s for potential product click.
  */
 app.get("/api/search", async (req, res) => {
     const query = req.query.q as string;
@@ -36,11 +38,12 @@ app.get("/api/search", async (req, res) => {
     try {
         console.log(`[API] Searching StockX for: ${normalizedQuery}`);
 
-        // Get products from StockX (max 50)
-        const products = await searchStockXCatalog(normalizedQuery);
+        const products = await withSearchSession((browser) =>
+            fetchStockXCatalogInBrowser(browser, normalizedQuery)
+        );
         const duration = Date.now() - startTime;
 
-        console.log(`[API] Found ${products.length} products in ${duration}ms`);
+        console.log(`[API] Found ${products.length} products in ${duration}ms (browser kept open 30s for product click)`);
 
         res.json({
             query: normalizedQuery,
@@ -51,7 +54,7 @@ app.get("/api/search", async (req, res) => {
             },
         });
     } catch (error) {
-        console.error("Search API error:", error);
+        console.error("[API] Search error:", error instanceof Error ? error.message : error);
         res.status(500).json({
             error: "Failed to search",
             message: error instanceof Error ? error.message : "Unknown error",
@@ -60,29 +63,54 @@ app.get("/api/search", async (req, res) => {
 });
 
 /**
- * Trending API - Returns most active sneakers from StockX
+ * Trending API - Returns most active sneakers from StockX.
+ * Uses Redis cache (6h TTL) when configured: hit → return cached; miss → fetch, store, return.
  */
 app.get("/api/trending", async (req, res) => {
     const startTime = Date.now();
 
     try {
-        console.log(`[API] Fetching trending sneakers`);
+        console.log(`[API] GET /api/trending`);
 
-        // Get trending products (most-active sort)
-        const products = await searchStockXCatalog(undefined, 'most-active');
-        const duration = Date.now() - startTime;
+        if (isRedisConfigured()) {
+            const cached = await getTrendingCache();
+            if (cached) {
+                const duration = Date.now() - startTime;
+                console.log(`[API] Trending served from cache: ${cached.products.length} products in ${duration}ms`);
+                return res.json({
+                    ...cached,
+                    meta: { ...cached.meta, cached: true },
+                });
+            }
+            console.log(`[API] Trending cache miss, fetching from StockX...`);
+        } else {
+            console.log(`[API] Redis not configured, fetching trending from StockX...`);
+        }
 
-        console.log(`[API] Found ${products.length} trending products in ${duration}ms`);
+        const products = await searchStockXCatalog(undefined, "most-active");
+        const fetchDuration = Date.now() - startTime;
+        console.log(`[API] StockX trending: ${products.length} products in ${fetchDuration}ms`);
 
-        res.json({
+        const payload = {
             products,
             meta: {
                 total: products.length,
                 timestamp: new Date().toISOString(),
+                cached: false,
             },
+        };
+
+        await setTrendingCache({
+            products: payload.products,
+            meta: { total: payload.meta.total, timestamp: payload.meta.timestamp },
         });
+
+        const totalDuration = Date.now() - startTime;
+        console.log(`[API] Trending response sent: ${products.length} products, total ${totalDuration}ms`);
+
+        res.json(payload);
     } catch (error) {
-        console.error("Trending API error:", error);
+        console.error("[API] Trending error:", error instanceof Error ? error.message : error);
         res.status(500).json({
             error: "Failed to fetch trending",
             message: error instanceof Error ? error.message : "Unknown error",
@@ -124,11 +152,93 @@ app.get("/api/product/style", async (req, res) => {
         });
     } catch (error) {
         if (signal.aborted) return;
-        console.error("Style ID API error:", error);
+        console.error("[API] Style ID error:", error instanceof Error ? error.message : error);
         res.status(500).json({
             error: "Failed to get Style ID",
             message: error instanceof Error ? error.message : "Unknown error",
         });
+    }
+});
+
+/**
+ * All-in-one: StockX product page + GOAT/KicksCrew/FlightClub/StadiumGoods.
+ * Uses ONE browser, 5 tabs. No separate connections → avoids Browserless 429.
+ */
+app.get("/api/product/all-prices", async (req, res) => {
+    const url = req.query.url as string;
+
+    if (!url || !url.includes("stockx.com")) {
+        return res.status(400).json({ error: "Valid StockX URL required" });
+    }
+
+    const signal = { aborted: false };
+    req.on("close", () => {
+        if (!res.writableEnded) signal.aborted = true;
+    });
+
+    const startTime = Date.now();
+
+    try {
+        const browser = await acquireBrowserForProduct();
+
+        const page1 = await createPage(browser);
+        const stockxData = await fetchStockXProductInPage(page1, url, signal);
+        await page1.close().catch(() => {});
+
+        const styleId = stockxData.styleId || "";
+        if (signal.aborted) return;
+
+        const sku = styleId.trim().length >= 3 ? styleId : "";
+
+        const runInTab = async <T>(fn: (p: Awaited<ReturnType<typeof createPage>>) => Promise<T>): Promise<T> => {
+            const p = await createPage(browser);
+            try {
+                return await fn(p);
+            } finally {
+                await p.close().catch(() => {});
+            }
+        };
+
+        const [goatData, kickscrewData, flightclubData, stadiumgoodsData] = await Promise.all([
+            runInTab((p) => scrapeGoatBySkuInPage(p, sku, signal)),
+            runInTab((p) => scrapeKickscrewBySkuInPage(p, sku, signal)),
+            runInTab((p) => scrapeFlightClubBySkuInPage(p, sku, signal)),
+            runInTab((p) => scrapeStadiumGoodsBySkuInPage(p, sku, signal)),
+        ]);
+
+        if (signal.aborted) return;
+
+        const duration = Date.now() - startTime;
+        console.log(`[API] All-prices done in ${duration}ms (1 browser, 5 tabs)`);
+
+        const fcSizes = flightclubData.sizes.map((s) => ({ size: s.size, price: s.price, priceCAD: s.priceCAD }));
+        const sgSizes = stadiumgoodsData.sizes.map((s) => ({ size: s.size, price: s.price, priceCAD: s.priceCAD }));
+
+        res.json({
+            styleId: stockxData.styleId,
+            stockx: {
+                productName: stockxData.productName,
+                productUrl: stockxData.productUrl,
+                imageUrl: stockxData.imageUrl,
+                sizes: stockxData.sizes,
+            },
+            goat: goatData ? { productName: goatData.productName, productUrl: goatData.productUrl, imageUrl: goatData.imageUrl, sizes: goatData.sizes } : null,
+            kickscrew: kickscrewData ? { productName: kickscrewData.productName, productUrl: kickscrewData.productUrl, imageUrl: kickscrewData.imageUrl, sizes: kickscrewData.sizes } : null,
+            flightclub: fcSizes.length ? { productName: "", productUrl: flightclubData.sizes[0]?.url ?? "", imageUrl: "", sizes: fcSizes } : null,
+            stadiumgoods: sgSizes.length ? { productName: "", productUrl: stadiumgoodsData.sizes[0]?.url ?? "", imageUrl: "", sizes: sgSizes } : null,
+            duration,
+            timestamp: new Date().toISOString(),
+        });
+    } catch (error) {
+        if (!signal.aborted) {
+            console.error("[API] All-prices error:", error instanceof Error ? error.message : error);
+            res.status(500).json({
+                error: "Failed to fetch prices",
+                message: error instanceof Error ? error.message : "Unknown error",
+            });
+        }
+    } finally {
+        await releaseSessionForProduct();
     }
 });
 
@@ -433,9 +543,13 @@ app.get("/api/prices", async (req, res) => {
 
 app.listen(PORT, () => {
     console.log(`🚀 Server running on http://localhost:${PORT}`);
+    console.log(`\nConfig:`);
+    console.log(`  Redis (trending cache): ${isRedisConfigured() ? "✓ configured" : "✗ not configured"}`);
+    console.log(`  Browserless (scraping): ${isBrowserlessConfigured() ? "✓ configured" : "✗ not configured"}`);
     console.log(`\nEndpoints:`);
     console.log(`  GET /api/search?q=jordan+1        - Search StockX`);
     console.log(`  GET /api/product/style?url=...    - Get Style ID from product page`);
+    console.log(`  GET /api/product/all-prices?url=... - StockX + GOAT + KicksCrew + FC + SG (1 browser, 5 tabs)`);
     console.log(`  GET /api/goat/prices?sku=...      - Get GOAT prices by SKU`);
     console.log(`  GET /api/kickscrew/prices?sku=... - Get KicksCrew prices by SKU`);
     console.log(`  GET /api/prices?sku=...           - Get all prices by SKU`);

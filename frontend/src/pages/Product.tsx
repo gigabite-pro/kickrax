@@ -36,7 +36,6 @@ interface SourceState {
 }
 
 const SOURCES: SourceKey[] = ['stockx', 'goat', 'kickscrew', 'flightclub', 'stadiumgoods'];
-const SKU_SOURCES: SourceKey[] = ['goat', 'kickscrew', 'flightclub', 'stadiumgoods'];
 
 const sourceConfig: Record<string, { name: string; color: string; url: string }> = {
   goat: { name: 'GOAT', color: 'bg-purple-500', url: 'https://goat.com' },
@@ -131,131 +130,97 @@ export default function Product() {
     };
   }, [product?.name]);
 
-  // Fetch from a single source
-  const fetchFromSource = useCallback(async (source: SourceKey, searchSku: string, signal?: AbortSignal) => {
-    setSourceStates(prev => ({
-      ...prev,
-      [source]: { loading: true, data: null, error: false }
-    }));
-
-    try {
-      const response = await fetch(api(`/api/prices/${source}?sku=${encodeURIComponent(searchSku)}`), { signal });
-      const result = await response.json();
-      
-      setSourceStates(prev => ({
-        ...prev,
-        [source]: { 
-          loading: false, 
-          data: result.data, 
-          error: false,
-          duration: result.duration 
-        }
-      }));
-    } catch (err: unknown) {
-      // Don't update state if request was aborted
-      if (err instanceof Error && err.name === 'AbortError') return;
-      
-      setSourceStates(prev => ({
-        ...prev,
-        [source]: { loading: false, data: null, error: true }
-      }));
-    }
-  }, []);
-
-  // Get style ID AND StockX prices from StockX
+  // Single request: all-prices (1 browser, 5 tabs). Avoids multiple Browserless connections.
   useEffect(() => {
-    // Create new abort controller for this request
+    if (!product?.stockxUrl) {
+      setStyleIdError('No product URL available');
+      setStyleIdLoading(false);
+      return;
+    }
+
     abortControllerRef.current = new AbortController();
     const signal = abortControllerRef.current.signal;
 
-    async function fetchStyleIdAndPrices() {
-      if (!product?.stockxUrl) {
-        setStyleIdError('No product URL available');
-        setStyleIdLoading(false);
-        return;
-      }
-      
-      // Mark StockX as loading
-      setSourceStates(prev => ({
-        ...prev,
-        stockx: { loading: true, data: null, error: false }
-      }));
-      
-      const startTime = Date.now();
-      
+    setSourceStates(prev => ({
+      ...prev,
+      stockx: { loading: true, data: null, error: false },
+      goat: { loading: true, data: null, error: false },
+      kickscrew: { loading: true, data: null, error: false },
+      flightclub: { loading: true, data: null, error: false },
+      stadiumgoods: { loading: true, data: null, error: false },
+    }));
+
+    (async () => {
+      const start = Date.now();
       try {
-        const response = await fetch(api(`/api/product/style?url=${encodeURIComponent(product.stockxUrl)}`), { signal });
-        const data = await response.json();
-        
-        if (data.styleId) {
-          setStyleId(data.styleId);
-        } else {
-          setStyleIdError('Could not find Style ID');
-        }
-        
-        // Set StockX prices from the same response
-        if (data.stockxPrices) {
-          setSourceStates(prev => ({
-            ...prev,
-            stockx: { 
-              loading: false, 
-              data: {
-                productName: data.stockxPrices.productName,
-                productUrl: data.stockxPrices.productUrl || product.stockxUrl,
-                imageUrl: data.stockxPrices.imageUrl,
-                sizes: data.stockxPrices.sizes || [],
-              }, 
-              error: false,
-              duration: Date.now() - startTime
-            }
-          }));
-        } else {
-          setSourceStates(prev => ({
-            ...prev,
-            stockx: { loading: false, data: null, error: true }
-          }));
-        }
-      } catch (err: unknown) {
-        // Don't update state if request was aborted
-        if (err instanceof Error && err.name === 'AbortError') return;
-        
-        console.error('Failed to get style ID:', err);
-        setStyleIdError('Failed to get product Style ID');
+        const res = await fetch(api(`/api/product/all-prices?url=${encodeURIComponent(product.stockxUrl)}`), { signal });
+        const data = await res.json();
+
+        if (signal?.aborted) return;
+        if (!res.ok) throw new Error(data.message || data.error || 'Failed to fetch prices');
+
+        if (data.styleId) setStyleId(data.styleId);
+        else setStyleIdError('Could not find Style ID');
+
+        const dur = Date.now() - start;
+
         setSourceStates(prev => ({
           ...prev,
-          stockx: { loading: false, data: null, error: true }
+          stockx: {
+            loading: false,
+            data: data.stockx ? {
+              productName: data.stockx.productName,
+              productUrl: data.stockx.productUrl || product.stockxUrl,
+              imageUrl: data.stockx.imageUrl,
+              sizes: data.stockx.sizes || [],
+            } : null,
+            error: !data.stockx,
+            duration: dur,
+          },
+          goat: {
+            loading: false,
+            data: data.goat,
+            error: !data.goat,
+            duration: dur,
+          },
+          kickscrew: {
+            loading: false,
+            data: data.kickscrew,
+            error: !data.kickscrew,
+            duration: dur,
+          },
+          flightclub: {
+            loading: false,
+            data: data.flightclub,
+            error: !data.flightclub,
+            duration: dur,
+          },
+          stadiumgoods: {
+            loading: false,
+            data: data.stadiumgoods,
+            error: !data.stadiumgoods,
+            duration: dur,
+          },
+        }));
+      } catch (e) {
+        if (e instanceof Error && e.name === 'AbortError') return;
+        console.error('All-prices fetch failed:', e);
+        setStyleIdError('Failed to load prices');
+        setSourceStates(prev => ({
+          ...prev,
+          stockx: { loading: false, data: null, error: true },
+          goat: { loading: false, data: null, error: true },
+          kickscrew: { loading: false, data: null, error: true },
+          flightclub: { loading: false, data: null, error: true },
+          stadiumgoods: { loading: false, data: null, error: true },
         }));
       } finally {
-        if (!signal.aborted) {
-          setStyleIdLoading(false);
-        }
+        if (!signal?.aborted) setStyleIdLoading(false);
       }
-    }
-    
-    fetchStyleIdAndPrices();
+    })();
 
-    return () => {
-      abortControllerRef.current?.abort();
-    };
+    return () => { abortControllerRef.current?.abort(); };
   }, [product?.stockxUrl]);
-
-  // Fetch from other sources in parallel when we have a style ID
-  useEffect(() => {
-    if (!styleId) return;
-    
-    // Create new abort controller for these requests
-    const controller = new AbortController();
-    abortControllerRef.current = controller;
-    
-    // Start fetching from SKU-based sources (StockX prices already fetched with style ID)
-    SKU_SOURCES.forEach(source => {
-      fetchFromSource(source, styleId, controller.signal);
-    });
-
-    return () => {
-      controller.abort();
-    };
-  }, [styleId, fetchFromSource]);
 
   // Check if any source is still loading
   const isAnyLoading = SOURCES.some(s => sourceStates[s].loading);

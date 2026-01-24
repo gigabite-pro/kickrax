@@ -1,34 +1,8 @@
-import puppeteer, { Browser, Page } from "puppeteer";
+import { Browser, Page } from "puppeteer";
 import * as cheerio from "cheerio";
 import { SOURCES, SneakerListing, CatalogProduct } from "../../types.js";
 import { ScraperResult, generateListingId } from "../types.js";
-import { launchBrowser, createPage, getPuppeteerOptions, AbortSignal, checkAbort, sleepWithAbort } from "../browser.js";
-
-// Browser instance with request counter for rotation
-let browser: Browser | null = null;
-let requestCount = 0;
-const MAX_REQUESTS_PER_BROWSER = 3; // Rotate browser after 3 requests to avoid detection
-
-async function getBrowser(): Promise<Browser> {
-    // Force new browser after MAX_REQUESTS or if disconnected
-    if (browser && browser.isConnected() && requestCount < MAX_REQUESTS_PER_BROWSER) {
-        requestCount++;
-        return browser;
-    }
-
-    // Close old browser if exists
-    if (browser) {
-        console.log("[StockX] Rotating browser to avoid detection...");
-        await browser.close().catch(() => {});
-        browser = null;
-    }
-
-    console.log("[StockX] Launching fresh browser...");
-    browser = await puppeteer.launch(getPuppeteerOptions());
-    requestCount = 1;
-
-    return browser;
-}
+import { launchBrowser, createPage, AbortSignal, checkAbort, sleepWithAbort } from "../browser.js";
 
 /**
  * Generate StockX image URL from product slug
@@ -98,54 +72,46 @@ function getImageUrl($tile: cheerio.Cheerio<any>, slug: string): string {
 }
 
 /**
- * Search StockX by scraping the HTML search results page using Puppeteer
- * URL: https://stockx.com/search?s=jordan+1
- * @param query - Search query (optional for trending)
- * @param sort - Sort option (e.g., 'most-active' for trending)
+ * Fetch StockX catalog (search or trending) using an existing browser.
+ * Creates a page, scrapes, closes the page only. Does NOT close the browser.
  */
-export async function searchStockXCatalog(query?: string, sort?: string): Promise<CatalogProduct[]> {
+export async function fetchStockXCatalogInBrowser(
+    browser: Browser,
+    query?: string,
+    sort?: string
+): Promise<CatalogProduct[]> {
     let page: Page | null = null;
-    const targetCount = 50; // Fixed limit of 50 products
+    const targetCount = 50;
 
     try {
-        // Build URL with optional query and sort
-        let searchUrl = 'https://stockx.com/search?category=sneakers';
+        let searchUrl = "https://stockx.com/search?category=sneakers";
         if (query) searchUrl += `&s=${encodeURIComponent(query)}`;
         if (sort) searchUrl += `&sort=${encodeURIComponent(sort)}`;
-        
-        console.log(`[StockX] Scraping with Puppeteer: ${searchUrl} (target: ${targetCount} products)`);
 
-        const browserInstance = await getBrowser();
-        page = await browserInstance.newPage();
+        console.log(`[StockX] Scraping: ${searchUrl} (target: ${targetCount} products)`);
+        page = await browser.newPage();
 
-        // Block unnecessary resources to speed up loading
         await page.setRequestInterception(true);
-        page.on('request', (req) => {
+        page.on("request", (req) => {
             const resourceType = req.resourceType();
-            // Block images, fonts, stylesheets, media - we only need HTML
-            if (['image', 'font', 'stylesheet', 'media'].includes(resourceType)) {
+            if (["image", "font", "stylesheet", "media"].includes(resourceType)) {
                 req.abort();
             } else {
                 req.continue();
             }
         });
 
-        // Smaller viewport for faster rendering
         await page.setViewport({ width: 1280, height: 800 });
-        
-        // Randomize user agent slightly
-        const chromeVersions = ['120', '121', '122', '123', '124'];
+        const chromeVersions = ["120", "121", "122", "123", "124"];
         const randomVersion = chromeVersions[Math.floor(Math.random() * chromeVersions.length)];
         await page.setUserAgent(`Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${randomVersion}.0.0.0 Safari/537.36`);
 
-        // Anti-detection: hide webdriver property
         await page.evaluateOnNewDocument(() => {
-            Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+            Object.defineProperty(navigator, "webdriver", { get: () => undefined });
             // @ts-ignore
             window.chrome = { runtime: {} };
         });
 
-        // Navigate to search page
         await page.goto(searchUrl, {
             waitUntil: "domcontentloaded",
             timeout: 15000,
@@ -315,31 +281,28 @@ export async function searchStockXCatalog(query?: string, sort?: string): Promis
         console.log(`[StockX] Extracted ${products.length} products from HTML`);
 
         return products;
-    } catch (error: any) {
-        console.error("[StockX] Puppeteer scraping error:", error.message);
+    } catch (error: unknown) {
+        console.error("[StockX] Catalog scrape error:", error instanceof Error ? error.message : error);
         return [];
     } finally {
-        // Close page but keep browser alive
-        if (page) {
-            await page.close().catch(() => {});
-        }
+        if (page) await page.close().catch(() => {});
     }
 }
 
-// Cleanup browser on process exit
-process.on("SIGINT", async () => {
-    if (browser) {
-        await browser.close();
+/**
+ * Search StockX catalog. Launches browser, fetches, closes browser.
+ * Use for trending. For search, use fetchStockXCatalogInBrowser with session.
+ */
+export async function searchStockXCatalog(query?: string, sort?: string): Promise<CatalogProduct[]> {
+    const browser = await launchBrowser();
+    try {
+        const products = await fetchStockXCatalogInBrowser(browser, query, sort);
+        return products;
+    } finally {
+        await browser.close().catch(() => {});
+        console.log("[StockX] Browser closed after catalog fetch");
     }
-    process.exit();
-});
-
-process.on("SIGTERM", async () => {
-    if (browser) {
-        await browser.close();
-    }
-    process.exit();
-});
+}
 
 function formatSlugToName(slug: string): string {
     return slug
@@ -398,7 +361,6 @@ export interface StockXProductData {
 
 /**
  * Get Style ID from a StockX product page
- * Scrapes the Product Details section for the Style value
  */
 export async function getProductStyleId(productUrl: string): Promise<string | null> {
     const data = await getProductDataWithPrices(productUrl);
@@ -406,219 +368,138 @@ export async function getProductStyleId(productUrl: string): Promise<string | nu
 }
 
 /**
- * Get Style ID AND prices from a StockX product page
- * Scrapes both the Style value and all size prices
+ * Scrape StockX product page (style ID + sizes + image) using an existing page.
+ * Does NOT close the page or browser. Caller manages lifecycle.
  */
-export async function getProductDataWithPrices(productUrl: string, signal?: AbortSignal): Promise<StockXProductData> {
-    const browser = await launchBrowser();
-    let page = null;
-
+export async function fetchStockXProductInPage(
+    page: Page,
+    productUrl: string,
+    signal?: AbortSignal
+): Promise<StockXProductData> {
     try {
-        checkAbort(signal, 'STOCKX');
-        page = await createPage(browser);
-
+        checkAbort(signal, "STOCKX");
         console.log(`[StockX] Loading product page: ${productUrl}`);
 
-        checkAbort(signal, 'STOCKX');
-        
-        // Retry navigation up to 2 times to handle transient frame detachment
-        let lastError: Error | null = null;
-        for (let attempt = 1; attempt <= 2; attempt++) {
-            try {
-                await page.goto(productUrl, {
-                    waitUntil: "networkidle2",
-                    timeout: 30000,
-                });
-                lastError = null;
-                break;
-            } catch (err) {
-                lastError = err as Error;
-                if (attempt < 2 && lastError.message.includes('frame was detached')) {
-                    console.log(`[StockX] Navigation failed (attempt ${attempt}), retrying...`);
-                    await page.close().catch(() => {});
-                    page = await createPage(browser);
-                    await new Promise(r => setTimeout(r, 1000));
-                } else {
-                    throw lastError;
-                }
-            }
-        }
+        await page.goto(productUrl, { waitUntil: "networkidle2", timeout: 30000 });
 
-        checkAbort(signal, 'STOCKX');
-        // Wait for the product traits section to load
+        checkAbort(signal, "STOCKX");
         await page
-            .waitForSelector('[data-component="ProductTraits"], [data-testid="product-traits"]', {
-                timeout: 10000,
-            })
-            .catch(() => console.log("[StockX] Product traits section not found with selector, trying alternative..."));
+            .waitForSelector('[data-component="ProductTraits"], [data-testid="product-traits"]', { timeout: 10000 })
+            .catch(() => console.log("[StockX] Product traits not found, continuing..."));
 
-        // Click on size selector to open the dropdown
-        try {
-            checkAbort(signal, 'STOCKX');
-            const sizeButton = await page.$('[data-testid="pdp-size-selector"], [data-testid="size-selector-button"], button[aria-haspopup="menu"]');
-            if (sizeButton) {
-                await sizeButton.click();
-                await sleepWithAbort(1000, signal, 'STOCKX');
-            }
-        } catch (e) {
-            if (e instanceof Error && e.message === 'ABORTED') throw e;
-            console.log("[StockX] Could not click size selector");
+        const sizeButton = await page.$('[data-testid="pdp-size-selector"], [data-testid="size-selector-button"], button[aria-haspopup="menu"]');
+        if (sizeButton) {
+            await sizeButton.click();
+            await sleepWithAbort(1000, signal, "STOCKX");
         }
 
-        // Wait for sizes to load
         try {
-            checkAbort(signal, 'STOCKX');
             await page.waitForSelector('[data-testid="sizes-wrapper"], [data-testid="size-selector-button"]', { timeout: 5000 });
-        } catch (e) {
-            if (e instanceof Error && e.message === 'ABORTED') throw e;
+        } catch {
             console.log("[StockX] Size wrapper not found");
         }
+        await sleepWithAbort(800, signal, "STOCKX");
 
-        // Get the page HTML
         const html = await page.content();
         const $ = cheerio.load(html);
 
-        // Extract Style ID
         let styleId: string | null = null;
-
-        $('[data-component="product-trait"], [data-testid="product-detail-trait"]').each((_, element) => {
-            const $trait = $(element);
-            const label = $trait.find("span").first().text().trim().toLowerCase();
-
-            if (label === "style") {
+        $('[data-component="product-trait"], [data-testid="product-detail-trait"]').each((_, el) => {
+            const $trait = $(el);
+            if ($trait.find("span").first().text().trim().toLowerCase() === "style") {
                 styleId = $trait.find("p").text().trim();
                 return false;
             }
         });
-
         if (!styleId) {
-            $('[data-component="ProductTraits"] [data-component="product-trait"]').each((_, element) => {
-                const $trait = $(element);
-                const label = $trait.find(".chakra-text").first().text().trim().toLowerCase();
-
-                if (label === "style") {
+            $('[data-component="ProductTraits"] [data-component="product-trait"]').each((_, el) => {
+                const $trait = $(el);
+                if ($trait.find(".chakra-text").first().text().trim().toLowerCase() === "style") {
                     styleId = $trait.find("p.chakra-text").text().trim();
                     return false;
                 }
             });
         }
-
         if (!styleId) {
-            const styleMatch = html.match(/Style<\/span>\s*<p[^>]*>([A-Z0-9\-]+)<\/p>/i);
-            if (styleMatch) {
-                styleId = styleMatch[1];
-            }
+            const m = html.match(/Style<\/span>\s*<p[^>]*>([A-Z0-9\-]+)<\/p>/i);
+            if (m) styleId = m[1];
         }
 
-        console.log(`[StockX] Extracted Style ID: ${styleId || "NOT FOUND"}`);
+        console.log(`[StockX] Style ID: ${styleId || "NOT FOUND"}`);
 
-        // Extract sizes and prices from the size selector
         const sizes: { size: string; price: number; priceCAD: number }[] = [];
-        
-        $('[data-testid="size-selector-button"]').each((_, element) => {
-            const $button = $(element);
-            
-            // Get size label - "US M 8.5" -> "8.5"
-            const sizeLabel = $button.find('[data-testid="selector-label"]').text().trim();
-            const sizeMatch = sizeLabel.match(/([\d.]+)$/);
-            if (!sizeMatch) return;
-            
-            const size = sizeMatch[1];
-            
-            // Get price - "CA$336" -> 336
-            const priceText = $button.find('[data-testid="selector-secondary-label"]').text().trim();
-            const priceMatch = priceText.match(/CA?\$?([\d,]+)/);
-            if (!priceMatch) return;
-            
-            const priceCAD = parseInt(priceMatch[1].replace(/,/g, ""));
-            
-            sizes.push({
-                size,
-                price: priceCAD, // StockX shows CAD prices directly
-                priceCAD,
-            });
+        $('[data-testid="size-selector-button"]').each((_, el) => {
+            const $b = $(el);
+            const label = $b.find('[data-testid="selector-label"]').text().trim();
+            const sm = label.match(/([\d.]+)$/);
+            if (!sm) return;
+            const priceText = $b.find('[data-testid="selector-secondary-label"]').text().trim();
+            const pm = priceText.match(/CA?\$?([\d,]+)/);
+            if (!pm) return;
+            const priceCAD = parseInt(pm[1].replace(/,/g, ""), 10);
+            sizes.push({ size: sm[1], price: priceCAD, priceCAD });
         });
-
-        // Sort by size
         sizes.sort((a, b) => parseFloat(a.size) - parseFloat(b.size));
 
-        console.log(`[STOCKX] Found ${sizes.length} sizes`);
-        if (sizes.length > 0) {
-            console.log(`[STOCKX] Sizes: ${sizes.map(s => `${s.size}=$${s.priceCAD}`).join(', ')}`);
-        }
-
-        // Get product name
-        const productName = $('h1').first().text().trim() || 'Unknown Product';
-        
-        // Get HD image from the 360 view component
-        let imageUrl = '';
-        
-        // Priority 1: Get from 360 view image (highest quality)
-        const $threeSixtyImg = $('[data-component="MediaContainer"] img[data-image-type="360"], [data-component="SingleImage"] img');
-        if ($threeSixtyImg.length) {
-            // Try to get 3x version from srcset (highest quality)
-            const srcset = $threeSixtyImg.attr('srcset') || '';
-            if (srcset) {
-                const srcsetLines = srcset.split(',');
-                // Look for 3x version first
-                for (const line of srcsetLines) {
-                    if (line.includes('3x')) {
-                        const urlMatch = line.match(/(https:\/\/images\.stockx\.com\/[^\s]+)/);
-                        if (urlMatch) {
-                            imageUrl = urlMatch[1].replace(/&amp;/g, '&');
+        const productName = $("h1").first().text().trim() || "Unknown Product";
+        let imageUrl = "";
+        const $img = $('[data-component="MediaContainer"] img[data-image-type="360"], [data-component="SingleImage"] img');
+        if ($img.length) {
+            const srcset = $img.attr("srcset") || "";
+            for (const line of srcset.split(",")) {
+                if (line.includes("3x")) {
+                    const u = line.match(/(https:\/\/images\.stockx\.com\/[^\s]+)/);
+                    if (u) {
+                        imageUrl = u[1].replace(/&amp;/g, "&");
+                        break;
+                    }
+                }
+            }
+            if (!imageUrl) {
+                for (const line of srcset.split(",")) {
+                    if (line.includes("2x")) {
+                        const u = line.match(/(https:\/\/images\.stockx\.com\/[^\s]+)/);
+                        if (u) {
+                            imageUrl = u[1].replace(/&amp;/g, "&");
                             break;
                         }
                     }
                 }
-                // Fall back to 2x
-                if (!imageUrl) {
-                    for (const line of srcsetLines) {
-                        if (line.includes('2x')) {
-                            const urlMatch = line.match(/(https:\/\/images\.stockx\.com\/[^\s]+)/);
-                            if (urlMatch) {
-                                imageUrl = urlMatch[1].replace(/&amp;/g, '&');
-                                break;
-                            }
-                        }
-                    }
-                }
             }
-            // Fall back to src attribute
-            if (!imageUrl) {
-                imageUrl = $threeSixtyImg.attr('src') || '';
-                imageUrl = imageUrl.replace(/&amp;/g, '&');
-            }
+            if (!imageUrl) imageUrl = ($img.attr("src") || "").replace(/&amp;/g, "&");
         }
-        
-        // Priority 2: Try any product image
         if (!imageUrl) {
-            const $productImg = $('img[alt*="product"], img[data-testid="product-image"]').first();
-            imageUrl = $productImg.attr('src') || '';
+            const $pi = $('img[alt*="product"], img[data-testid="product-image"]').first();
+            imageUrl = $pi.attr("src") || "";
         }
-        
-        console.log(`[StockX] HD Image URL: ${imageUrl.substring(0, 100)}...`);
 
-        return {
-            styleId,
-            productName,
-            productUrl,
-            imageUrl,
-            sizes,
-        };
+        return { styleId, productName, productUrl, imageUrl, sizes };
+    } catch (e) {
+        if (e instanceof Error && e.message === "ABORTED") throw e;
+        console.error("[StockX] Product page error:", e);
+        return { styleId: null, productName: "", productUrl, imageUrl: "", sizes: [] };
+    }
+}
+
+/**
+ * Get Style ID AND prices from a StockX product page (standalone: launches and closes browser).
+ */
+export async function getProductDataWithPrices(productUrl: string, signal?: AbortSignal): Promise<StockXProductData> {
+    const browser = await launchBrowser();
+    let page: Page | null = null;
+
+    try {
+        checkAbort(signal, "STOCKX");
+        page = await createPage(browser);
+        const data = await fetchStockXProductInPage(page, productUrl, signal);
+        return data;
     } catch (error) {
-        if (error instanceof Error && error.message === 'ABORTED') {
-            console.log('[STOCKX] Scraping aborted, closing browser');
-        } else {
-            console.error("[StockX] Error getting product data:", error);
-        }
-        return {
-            styleId: null,
-            productName: '',
-            productUrl,
-            imageUrl: '',
-            sizes: [],
-        };
+        if (error instanceof Error && error.message === "ABORTED") throw error;
+        console.error("[StockX] Error getting product data:", error);
+        return { styleId: null, productName: "", productUrl, imageUrl: "", sizes: [] };
     } finally {
-        await browser.close();
+        if (page) await page.close().catch(() => {});
+        await browser.close().catch(() => {});
+        console.log("[StockX] Browser closed after product page");
     }
 }

@@ -1,3 +1,4 @@
+import type { Page } from "puppeteer";
 import { SOURCES, SneakerListing, SourcePricing, SizePrice } from "../../types.js";
 import { ScraperResult, generateListingId } from "../types.js";
 import { launchBrowser, createPage, AbortSignal, checkAbort, sleepWithAbort } from "../browser.js";
@@ -10,17 +11,14 @@ export interface StadiumGoodsSizePricing {
 }
 
 /**
- * Search Stadium Goods by SKU and get all size prices
+ * Scrape Stadium Goods by SKU using an existing page. Does not close page/browser.
  */
-export async function searchStadiumGoodsBySku(sku: string, signal?: AbortSignal): Promise<SourcePricing> {
+export async function scrapeStadiumGoodsBySkuInPage(page: Page, sku: string, signal?: AbortSignal): Promise<SourcePricing> {
     const source = SOURCES["stadium-goods"];
     console.log(`[STADIUMGOODS] Searching for SKU: ${sku}`);
 
-    const browser = await launchBrowser();
-
     try {
-        checkAbort(signal, 'STADIUMGOODS');
-        const page = await createPage(browser);
+        checkAbort(signal, "STADIUMGOODS");
 
         // Step 1: Search Stadium Goods
         const searchUrl = `https://www.stadiumgoods.com/search?q=${encodeURIComponent(sku)}`;
@@ -63,7 +61,6 @@ export async function searchStadiumGoodsBySku(sku: string, signal?: AbortSignal)
 
         if (!productData || !productData.href) {
             console.log("[STADIUMGOODS] No product found");
-            await browser.close();
             return { source, sizes: [], lowestPrice: 0, available: false };
         }
 
@@ -83,7 +80,6 @@ export async function searchStadiumGoodsBySku(sku: string, signal?: AbortSignal)
             await page.waitForSelector('.ProductForm__select__list', { timeout: 5000 });
         } catch (e) {
             console.log("[STADIUMGOODS] Size list not found");
-            await browser.close();
             return { source, sizes: [], lowestPrice: 0, available: false };
         }
 
@@ -136,20 +132,27 @@ export async function searchStadiumGoodsBySku(sku: string, signal?: AbortSignal)
 
         console.log(`[STADIUMGOODS] Found ${sizes.length} sizes`);
         if (sizes.length > 0) {
-            console.log(`[STADIUMGOODS] Sizes: ${sizes.map(s => `${s.size}=$${s.price}`).join(', ')}`);
+            console.log(`[STADIUMGOODS] Sizes: ${sizes.map(s => `${s.size}=$${s.price}`).join(", ")}`);
         }
-
-        await browser.close();
 
         return { source, sizes, lowestPrice, available: sizes.length > 0 };
     } catch (error) {
-        if (error instanceof Error && error.message === 'ABORTED') {
-            console.log('[STADIUMGOODS] Scraping aborted, closing browser');
-        } else {
-            console.error("[STADIUMGOODS] Error:", error);
-        }
-        await browser.close();
+        if (error instanceof Error && error.message === "ABORTED") throw error;
+        console.error("[STADIUMGOODS] Error:", error);
         return { source, sizes: [], lowestPrice: 0, available: false };
+    }
+}
+
+/**
+ * Search Stadium Goods by SKU (standalone: launches and closes browser).
+ */
+export async function searchStadiumGoodsBySku(sku: string, signal?: AbortSignal): Promise<SourcePricing> {
+    const browser = await launchBrowser();
+    try {
+        const page = await createPage(browser);
+        return await scrapeStadiumGoodsBySkuInPage(page, sku, signal);
+    } finally {
+        await browser.close().catch(() => {});
     }
 }
 

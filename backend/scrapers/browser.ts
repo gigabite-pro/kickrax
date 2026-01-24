@@ -7,6 +7,16 @@ export interface AbortSignal {
     aborted: boolean;
 }
 
+const BROWSERLESS_API_TOKEN = process.env.BROWSERLESS_API_TOKEN;
+
+/**
+ * Whether Browserless.io is configured (BROWSERLESS_API_TOKEN set).
+ * When true, launchBrowser can connect to Browserless instead of local Puppeteer.
+ */
+export function isBrowserlessConfigured(): boolean {
+    return !!BROWSERLESS_API_TOKEN;
+}
+
 /**
  * Get Puppeteer launch options that work for both local and Docker environments
  */

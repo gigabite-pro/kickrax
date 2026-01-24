@@ -1,3 +1,4 @@
+import type { Page } from "puppeteer";
 import { SOURCES, SneakerListing, SourcePricing, SizePrice } from "../../types.js";
 import { ScraperResult, generateListingId, USD_TO_CAD_RATE } from "../types.js";
 import { launchBrowser, createPage, AbortSignal, checkAbort, sleepWithAbort } from "../browser.js";
@@ -10,16 +11,13 @@ export interface KickscrewSizePricing {
 }
 
 /**
- * Search KicksCrew by SKU and get all size prices from the first result
+ * Scrape KicksCrew by SKU using an existing page. Does not close page/browser.
  */
-export async function searchKickscrewBySku(sku: string, signal?: AbortSignal): Promise<KickscrewSizePricing | null> {
+export async function scrapeKickscrewBySkuInPage(page: Page, sku: string, signal?: AbortSignal): Promise<KickscrewSizePricing | null> {
     console.log(`[KICKSCREW] Searching for SKU: ${sku}`);
-    
-    const browser = await launchBrowser();
 
     try {
-        checkAbort(signal, 'KICKSCREW');
-        const page = await createPage(browser);
+        checkAbort(signal, "KICKSCREW");
 
         // Step 1: Search KicksCrew
         const searchUrl = `https://www.kickscrew.com/en-CA/search?q=${encodeURIComponent(sku)}`;
@@ -229,14 +227,22 @@ export async function searchKickscrewBySku(sku: string, signal?: AbortSignal): P
             sizes,
         };
     } catch (error) {
-        if (error instanceof Error && error.message === 'ABORTED') {
-            console.log('[KICKSCREW] Scraping aborted, closing browser');
-        } else {
-            console.error("[KICKSCREW] Error:", error);
-        }
+        if (error instanceof Error && error.message === "ABORTED") throw error;
+        console.error("[KICKSCREW] Error:", error);
         return null;
+    }
+}
+
+/**
+ * Search KicksCrew by SKU (standalone: launches and closes browser).
+ */
+export async function searchKickscrewBySku(sku: string, signal?: AbortSignal): Promise<KickscrewSizePricing | null> {
+    const browser = await launchBrowser();
+    try {
+        const page = await createPage(browser);
+        return await scrapeKickscrewBySkuInPage(page, sku, signal);
     } finally {
-        await browser.close();
+        await browser.close().catch(() => {});
     }
 }
 

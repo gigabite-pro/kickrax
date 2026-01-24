@@ -1,3 +1,4 @@
+import type { Page } from "puppeteer";
 import { SOURCES, SneakerListing, SourcePricing, SizePrice } from "../../types.js";
 import { ScraperResult, generateListingId } from "../types.js";
 import { launchBrowser, createPage, AbortSignal, checkAbort, sleepWithAbort } from "../browser.js";
@@ -18,17 +19,14 @@ interface FlightClubVariant {
 }
 
 /**
- * Search Flight Club by SKU and get all size prices
+ * Scrape Flight Club by SKU using an existing page. Does not close page/browser.
  */
-export async function searchFlightClubBySku(sku: string, signal?: AbortSignal): Promise<SourcePricing> {
+export async function scrapeFlightClubBySkuInPage(page: Page, sku: string, signal?: AbortSignal): Promise<SourcePricing> {
     const source = SOURCES["flight-club"];
     console.log(`[FLIGHTCLUB] Searching for SKU: ${sku}`);
 
-    const browser = await launchBrowser();
-
     try {
-        checkAbort(signal, 'FLIGHTCLUB');
-        const page = await createPage(browser);
+        checkAbort(signal, "FLIGHTCLUB");
 
         // Step 1: Search Flight Club
         const searchUrl = `https://www.flightclub.com/catalogsearch/result?query=${encodeURIComponent(sku)}`;
@@ -61,7 +59,6 @@ export async function searchFlightClubBySku(sku: string, signal?: AbortSignal): 
 
         if (!productData || !productData.href) {
             console.log("[FLIGHTCLUB] No product found");
-            await browser.close();
             return { source, sizes: [], lowestPrice: 0, available: false };
         }
 
@@ -99,7 +96,6 @@ export async function searchFlightClubBySku(sku: string, signal?: AbortSignal): 
 
         if (apiData.error) {
             console.log(`[FLIGHTCLUB] API Error: ${apiData.error}`);
-            await browser.close();
             return { source, sizes: [], lowestPrice: 0, available: false };
         }
 
@@ -138,20 +134,27 @@ export async function searchFlightClubBySku(sku: string, signal?: AbortSignal): 
 
         console.log(`[FLIGHTCLUB] Found ${sizes.length} sizes`);
         if (sizes.length > 0) {
-            console.log(`[FLIGHTCLUB] Sizes: ${sizes.map(s => `${s.size}=$${s.priceCAD}`).join(', ')}`);
+            console.log(`[FLIGHTCLUB] Sizes: ${sizes.map(s => `${s.size}=$${s.priceCAD}`).join(", ")}`);
         }
-
-        await browser.close();
 
         return { source, sizes, lowestPrice, available: sizes.length > 0 };
     } catch (error) {
-        if (error instanceof Error && error.message === 'ABORTED') {
-            console.log('[FLIGHTCLUB] Scraping aborted, closing browser');
-        } else {
-            console.error("[FLIGHTCLUB] Error:", error);
-        }
-        await browser.close();
+        if (error instanceof Error && error.message === "ABORTED") throw error;
+        console.error("[FLIGHTCLUB] Error:", error);
         return { source, sizes: [], lowestPrice: 0, available: false };
+    }
+}
+
+/**
+ * Search Flight Club by SKU (standalone: launches and closes browser).
+ */
+export async function searchFlightClubBySku(sku: string, signal?: AbortSignal): Promise<SourcePricing> {
+    const browser = await launchBrowser();
+    try {
+        const page = await createPage(browser);
+        return await scrapeFlightClubBySkuInPage(page, sku, signal);
+    } finally {
+        await browser.close().catch(() => {});
     }
 }
 

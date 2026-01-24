@@ -1,3 +1,4 @@
+import type { Page } from "puppeteer";
 import * as cheerio from "cheerio";
 import { SOURCES, SneakerListing, SourcePricing, SizePrice } from "../../types.js";
 import { ScraperResult, convertToCAD, generateListingId, USD_TO_CAD_RATE } from "../types.js";
@@ -11,16 +12,13 @@ export interface GoatSizePricing {
 }
 
 /**
- * Search GOAT by SKU and get all size prices from the first result
+ * Scrape GOAT by SKU using an existing page. Does not close page/browser.
  */
-export async function searchGoatBySku(sku: string, signal?: AbortSignal): Promise<GoatSizePricing | null> {
+export async function scrapeGoatBySkuInPage(page: Page, sku: string, signal?: AbortSignal): Promise<GoatSizePricing | null> {
     console.log(`[GOAT] Searching for SKU: ${sku}`);
 
-    const browser = await launchBrowser();
-
     try {
-        checkAbort(signal, 'GOAT');
-        const page = await createPage(browser);
+        checkAbort(signal, "GOAT");
 
         await page.setExtraHTTPHeaders({
             "Accept-Language": "en-CA,en;q=0.9",
@@ -169,14 +167,22 @@ export async function searchGoatBySku(sku: string, signal?: AbortSignal): Promis
             sizes,
         };
     } catch (error) {
-        if (error instanceof Error && error.message === 'ABORTED') {
-            console.log('[GOAT] Scraping aborted, closing browser');
-        } else {
-            console.error("[GOAT] Error:", error);
-        }
+        if (error instanceof Error && error.message === "ABORTED") throw error;
+        console.error("[GOAT] Error:", error);
         return null;
+    }
+}
+
+/**
+ * Search GOAT by SKU (standalone: launches and closes browser).
+ */
+export async function searchGoatBySku(sku: string, signal?: AbortSignal): Promise<GoatSizePricing | null> {
+    const browser = await launchBrowser();
+    try {
+        const page = await createPage(browser);
+        return await scrapeGoatBySkuInPage(page, sku, signal);
     } finally {
-        await browser.close();
+        await browser.close().catch(() => {});
     }
 }
 
