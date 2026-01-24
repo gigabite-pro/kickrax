@@ -130,7 +130,7 @@ export default function Product() {
     };
   }, [product?.name]);
 
-  // Single request: all-prices (1 browser, 5 tabs). Avoids multiple Browserless connections.
+  // Stream all-prices via SSE: show each source as soon as it arrives (same structure, incremental UI).
   useEffect(() => {
     if (!product?.stockxUrl) {
       setStyleIdError('No product URL available');
@@ -140,6 +140,7 @@ export default function Product() {
 
     abortControllerRef.current = new AbortController();
     const signal = abortControllerRef.current.signal;
+    const start = Date.now();
 
     setSourceStates(prev => ({
       ...prev,
@@ -151,60 +152,92 @@ export default function Product() {
     }));
 
     (async () => {
-      const start = Date.now();
       try {
         const res = await fetch(api(`/api/product/all-prices?url=${encodeURIComponent(product.stockxUrl)}`), { signal });
-        const data = await res.json();
-
         if (signal?.aborted) return;
-        if (!res.ok) throw new Error(data.message || data.error || 'Failed to fetch prices');
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.message || err.error || 'Failed to fetch prices');
+        }
 
-        if (data.styleId) setStyleId(data.styleId);
-        else setStyleIdError('Could not find Style ID');
+        const reader = res.body?.getReader();
+        const decoder = new TextDecoder();
+        if (!reader) throw new Error('No response body');
 
-        const dur = Date.now() - start;
+        let buf = '';
+        const processEvent = (event: string, data: unknown) => {
+          if (event === 'error') {
+            setStyleIdError((data as { message?: string })?.message || 'Failed to load prices');
+            SOURCES.forEach(s => {
+              setSourceStates(prev => ({ ...prev, [s]: { loading: false, data: null, error: true } }));
+            });
+            setStyleIdLoading(false);
+            return;
+          }
+          if (event === 'done') {
+            setStyleIdLoading(false);
+            return;
+          }
+          if (event !== 'update' || typeof data !== 'object' || !data) return;
 
-        setSourceStates(prev => ({
-          ...prev,
-          stockx: {
-            loading: false,
-            data: data.stockx ? {
-              productName: data.stockx.productName,
-              productUrl: data.stockx.productUrl || product.stockxUrl,
-              imageUrl: data.stockx.imageUrl,
-              sizes: data.stockx.sizes || [],
-            } : null,
-            error: !data.stockx,
-            duration: dur,
-          },
-          goat: {
-            loading: false,
-            data: data.goat,
-            error: !data.goat,
-            duration: dur,
-          },
-          kickscrew: {
-            loading: false,
-            data: data.kickscrew,
-            error: !data.kickscrew,
-            duration: dur,
-          },
-          flightclub: {
-            loading: false,
-            data: data.flightclub,
-            error: !data.flightclub,
-            duration: dur,
-          },
-          stadiumgoods: {
-            loading: false,
-            data: data.stadiumgoods,
-            error: !data.stadiumgoods,
-            duration: dur,
-          },
-        }));
+          const d = data as Record<string, unknown>;
+          const dur = Date.now() - start;
+
+          if (d.styleId != null) {
+            setStyleId(d.styleId as string);
+            if (!d.styleId) setStyleIdError('Could not find Style ID');
+          }
+          if (d.stockx != null) {
+            const sx = d.stockx as SourceResult | null;
+            setSourceStates(prev => ({
+              ...prev,
+              stockx: {
+                loading: false,
+                data: sx ? {
+                  productName: sx.productName,
+                  productUrl: sx.productUrl || product!.stockxUrl!,
+                  imageUrl: sx.imageUrl,
+                  sizes: sx.sizes || [],
+                } : null,
+                error: !sx,
+                duration: dur,
+              },
+            }));
+            setStyleIdLoading(false);
+          }
+          (['goat', 'kickscrew', 'flightclub', 'stadiumgoods'] as const).forEach(source => {
+            if (d[source] === undefined) return;
+            const val = d[source] as SourceResult | null;
+            setSourceStates(prev => ({
+              ...prev,
+              [source]: { loading: false, data: val, error: !val, duration: dur },
+            }));
+          });
+        };
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          if (signal?.aborted) break;
+          buf += decoder.decode(value, { stream: true });
+          const parts = buf.split('\n\n');
+          buf = parts.pop() ?? '';
+          for (const part of parts) {
+            let event = 'update';
+            let data: unknown = null;
+            for (const line of part.split('\n')) {
+              if (line.startsWith('event:')) event = line.slice(6).trim();
+              else if (line.startsWith('data:')) {
+                try { data = JSON.parse(line.slice(5).trim()); } catch { /* ignore */ }
+              }
+            }
+            processEvent(event, data);
+          }
+        }
+        if (!signal?.aborted) setStyleIdLoading(false);
       } catch (e) {
         if (e instanceof Error && e.name === 'AbortError') return;
-        console.error('All-prices fetch failed:', e);
+        console.error('All-prices stream failed:', e);
         setStyleIdError('Failed to load prices');
         setSourceStates(prev => ({
           ...prev,
@@ -214,8 +247,7 @@ export default function Product() {
           flightclub: { loading: false, data: null, error: true },
           stadiumgoods: { loading: false, data: null, error: true },
         }));
-      } finally {
-        if (!signal?.aborted) setStyleIdLoading(false);
+        setStyleIdLoading(false);
       }
     })();
 

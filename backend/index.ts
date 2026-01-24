@@ -162,7 +162,8 @@ app.get("/api/product/style", async (req, res) => {
 
 /**
  * All-in-one: StockX product page + GOAT/KicksCrew/FlightClub/StadiumGoods.
- * Uses ONE browser, 5 tabs. No separate connections → avoids Browserless 429.
+ * Uses ONE browser, 5 tabs. Streams SSE events as each source completes so the
+ * UI can show prices as soon as any one source returns.
  */
 app.get("/api/product/all-prices", async (req, res) => {
     const url = req.query.url as string;
@@ -178,7 +179,18 @@ app.get("/api/product/all-prices", async (req, res) => {
 
     const startTime = Date.now();
 
+    const writeEvent = (event: string, data: object) => {
+        if (res.writableEnded || signal.aborted) return;
+        res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+    };
+
     try {
+        res.setHeader("Content-Type", "text/event-stream");
+        res.setHeader("Cache-Control", "no-cache");
+        res.setHeader("Connection", "keep-alive");
+        res.setHeader("X-Accel-Buffering", "no");
+        res.flushHeaders?.();
+
         const browser = await acquireBrowserForProduct();
 
         const page1 = await createPage(browser);
@@ -187,6 +199,17 @@ app.get("/api/product/all-prices", async (req, res) => {
 
         const styleId = stockxData.styleId || "";
         if (signal.aborted) return;
+
+        writeEvent("update", {
+            styleId: stockxData.styleId,
+            stockx: {
+                productName: stockxData.productName,
+                productUrl: stockxData.productUrl,
+                imageUrl: stockxData.imageUrl,
+                sizes: stockxData.sizes,
+            },
+        });
+        console.log(`[API] All-prices: StockX streamed (${stockxData.sizes?.length ?? 0} sizes)`);
 
         const sku = styleId.trim().length >= 3 ? styleId : "";
 
@@ -199,46 +222,57 @@ app.get("/api/product/all-prices", async (req, res) => {
             }
         };
 
-        const [goatData, kickscrewData, flightclubData, stadiumgoodsData] = await Promise.all([
-            runInTab((p) => scrapeGoatBySkuInPage(p, sku, signal)),
-            runInTab((p) => scrapeKickscrewBySkuInPage(p, sku, signal)),
-            runInTab((p) => scrapeFlightClubBySkuInPage(p, sku, signal)),
-            runInTab((p) => scrapeStadiumGoodsBySkuInPage(p, sku, signal)),
+        const runAndEmit = async (
+            source: "goat" | "kickscrew" | "flightclub" | "stadiumgoods",
+            fn: () => Promise<unknown>
+        ) => {
+            try {
+                const data = await fn();
+                if (signal.aborted) return;
+                const payload: Record<string, unknown> = {};
+                if (source === "flightclub") {
+                    const d = data as { sizes?: { size: string; price: number; priceCAD: number; url?: string }[] };
+                    const sizes = d.sizes ?? [];
+                    payload[source] = sizes.length
+                        ? { productName: "", productUrl: sizes[0]?.url ?? "", imageUrl: "", sizes: sizes.map((s) => ({ size: s.size, price: s.price, priceCAD: s.priceCAD })) }
+                        : null;
+                } else if (source === "stadiumgoods") {
+                    const d = data as { sizes?: { size: string; price: number; priceCAD: number; url?: string }[] };
+                    const sizes = d.sizes ?? [];
+                    payload[source] = sizes.length
+                        ? { productName: "", productUrl: sizes[0]?.url ?? "", imageUrl: "", sizes: sizes.map((s) => ({ size: s.size, price: s.price, priceCAD: s.priceCAD })) }
+                        : null;
+                } else {
+                    payload[source] = data;
+                }
+                writeEvent("update", payload);
+                console.log(`[API] All-prices: ${source} streamed`);
+            } catch (e) {
+                if (signal.aborted) return;
+                writeEvent("update", { [source]: null });
+            }
+        };
+
+        await Promise.all([
+            runAndEmit("goat", () => runInTab((p) => scrapeGoatBySkuInPage(p, sku, signal))),
+            runAndEmit("kickscrew", () => runInTab((p) => scrapeKickscrewBySkuInPage(p, sku, signal))),
+            runAndEmit("flightclub", () => runInTab((p) => scrapeFlightClubBySkuInPage(p, sku, signal))),
+            runAndEmit("stadiumgoods", () => runInTab((p) => scrapeStadiumGoodsBySkuInPage(p, sku, signal))),
         ]);
 
         if (signal.aborted) return;
 
         const duration = Date.now() - startTime;
         console.log(`[API] All-prices done in ${duration}ms (1 browser, 5 tabs)`);
-
-        const fcSizes = flightclubData.sizes.map((s) => ({ size: s.size, price: s.price, priceCAD: s.priceCAD }));
-        const sgSizes = stadiumgoodsData.sizes.map((s) => ({ size: s.size, price: s.price, priceCAD: s.priceCAD }));
-
-        res.json({
-            styleId: stockxData.styleId,
-            stockx: {
-                productName: stockxData.productName,
-                productUrl: stockxData.productUrl,
-                imageUrl: stockxData.imageUrl,
-                sizes: stockxData.sizes,
-            },
-            goat: goatData ? { productName: goatData.productName, productUrl: goatData.productUrl, imageUrl: goatData.imageUrl, sizes: goatData.sizes } : null,
-            kickscrew: kickscrewData ? { productName: kickscrewData.productName, productUrl: kickscrewData.productUrl, imageUrl: kickscrewData.imageUrl, sizes: kickscrewData.sizes } : null,
-            flightclub: fcSizes.length ? { productName: "", productUrl: flightclubData.sizes[0]?.url ?? "", imageUrl: "", sizes: fcSizes } : null,
-            stadiumgoods: sgSizes.length ? { productName: "", productUrl: stadiumgoodsData.sizes[0]?.url ?? "", imageUrl: "", sizes: sgSizes } : null,
-            duration,
-            timestamp: new Date().toISOString(),
-        });
+        writeEvent("done", { duration, timestamp: new Date().toISOString() });
     } catch (error) {
         if (!signal.aborted) {
             console.error("[API] All-prices error:", error instanceof Error ? error.message : error);
-            res.status(500).json({
-                error: "Failed to fetch prices",
-                message: error instanceof Error ? error.message : "Unknown error",
-            });
+            writeEvent("error", { message: error instanceof Error ? error.message : "Unknown error" });
         }
     } finally {
         await releaseSessionForProduct();
+        if (!res.writableEnded) res.end();
     }
 });
 
