@@ -1,8 +1,8 @@
 import { launchBrowser } from "./scrapers/browser.js";
-const IDLE_TIMEOUT_MS = 30000; // 30 seconds
+const IDLE_TIMEOUT_MS = 30000;
 let sessionBrowser = null;
 let idleTimer = null;
-let connectingPromise = null; // Lock: if set, a connection is in progress
+let connectingPromise = null;
 function clearIdleTimer() {
     if (idleTimer) {
         clearTimeout(idleTimer);
@@ -37,9 +37,7 @@ export function getSessionBrowser() {
     return sessionBrowser;
 }
 /**
- * Acquire a browser for product/prices flow. Cancels idle timer.
- * Returns existing session browser if still open, otherwise launches and stores one.
- * If a connection is in progress, waits for it instead of starting a new one.
+ * Acquire a browser for product/prices flow (Puppeteer only).
  * Call releaseSessionForProduct() when done.
  */
 export async function acquireBrowserForProduct() {
@@ -47,21 +45,19 @@ export async function acquireBrowserForProduct() {
     if (sessionBrowser && sessionBrowser.isConnected()) {
         return sessionBrowser;
     }
-    // If another request is already connecting, wait for it
     if (connectingPromise) {
         await connectingPromise;
         if (sessionBrowser && sessionBrowser.isConnected()) {
             return sessionBrowser;
         }
     }
-    // Start connection (others will wait on this promise)
     connectingPromise = (async () => {
         try {
             sessionBrowser = await launchBrowser();
             console.log("[SearchSession] Browser acquired for product/prices");
             return sessionBrowser;
         } finally {
-            connectingPromise = null; // Clear lock when done
+            connectingPromise = null;
         }
     })();
     return await connectingPromise;

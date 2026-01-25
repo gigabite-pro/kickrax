@@ -2,6 +2,7 @@ import * as cheerio from "cheerio";
 import { SOURCES } from "../../types.js";
 import { generateListingId } from "../types.js";
 import { launchBrowser, createPage, checkAbort, sleepWithAbort } from "../browser.js";
+import { executeBrowserQL, isBrowserQLConfigured } from "../browserql.js";
 /**
  * Generate StockX image URL from product slug
  * Pattern: https://images.stockx.com/360/{Product-Name}/Images/{Product-Name}/Lv2/img01.jpg?w=576&q=60&dpr=1&updated_at=1714998206&h=384
@@ -322,11 +323,18 @@ export async function getProductStyleId(productUrl) {
 /**
  * Scrape StockX product page (style ID + sizes + image) using an existing page.
  * Does NOT close the page or browser. Caller manages lifecycle.
+ * Uses BrowserQL if configured, otherwise uses the provided page.
  */
 export async function fetchStockXProductInPage(page, productUrl, signal) {
+    if (isBrowserQLConfigured()) {
+        console.log(`[StockX] Using BrowserQL`);
+        return await getProductDataWithPricesBrowserQL(productUrl, signal);
+    }
+
+    // Fallback to Puppeteer only if BrowserQL is not configured
     try {
         checkAbort(signal, "STOCKX");
-        console.log(`[StockX] Loading product page: ${productUrl}`);
+        console.log(`[StockX] Using Puppeteer to load product page: ${productUrl}`);
         await page.goto(productUrl, { waitUntil: "networkidle2", timeout: 30000 });
         checkAbort(signal, "STOCKX");
         await page
@@ -426,9 +434,178 @@ export async function fetchStockXProductInPage(page, productUrl, signal) {
     }
 }
 /**
+ * Get Style ID AND prices from a StockX product page using BrowserQL
+ */
+export async function getProductDataWithPricesBrowserQL(productUrl, signal) {
+    if (!isBrowserQLConfigured()) {
+        throw new Error("BROWSERLESS_API_TOKEN is required for BrowserQL");
+    }
+
+    checkAbort(signal, "STOCKX");
+    console.log(`[StockX] Using BrowserQL to scrape: ${productUrl}`);
+
+    const mutation = `
+        mutation ScrapeStockX($url: String!) {
+            viewport(width: 1366, height: 768) {
+                width
+                height
+                time
+            }
+            goto(url: $url, waitUntil: networkIdle) {
+                status
+            }
+            waitForCloudflare: waitForTimeout(time: 5000) {
+                time
+            }
+            waitForProduct: waitForSelector(selector: "[data-component='ProductTraits']", timeout: 15000) {
+                time
+            }
+            waitForStability: waitForTimeout(time: 5000) {
+                time
+            }
+            waitForSizeButton: waitForSelector(selector: "#menu-button-pdp-size-selector", timeout: 10000) {
+                time
+            }
+            waitBeforeClick: waitForTimeout(time: 3000) {
+                time
+            }
+            clickSizeButton: click(selector: "#menu-button-pdp-size-selector") {
+                x
+                y
+            }
+            waitForMenu: waitForTimeout(time: 1500) {
+                time
+            }
+            clickUSM: click(selector: "button[data-testid='size-conversion-chip']") {
+                x
+                y
+            }
+            waitForSizesUpdate: waitForTimeout(time: 1000) {
+                time
+            }
+            sizeLabels: querySelectorAll(selector: "button[data-testid='size-selector-button'] [data-testid='selector-label']") {
+                text: innerText
+            }
+            priceLabels: querySelectorAll(selector: "button[data-testid='size-selector-button'] [data-testid='selector-secondary-label']") {
+                text: innerText
+            }
+            html: html(selector: "body") {
+                html
+            }
+        }
+    `;
+
+    try {
+        const data = await executeBrowserQL(mutation, { url: productUrl });
+        
+        checkAbort(signal, "STOCKX");
+
+        let styleId = null;
+        const html = data.html?.html || "";
+        const $ = cheerio.load(html);
+        
+        $('[data-component="product-trait"], [data-testid="product-detail-trait"]').each((_, el) => {
+            const $trait = $(el);
+            if ($trait.find("span").first().text().trim().toLowerCase() === "style") {
+                styleId = $trait.find("p").text().trim();
+                return false;
+            }
+        });
+        
+        if (!styleId) {
+            $('[data-component="ProductTraits"] [data-component="product-trait"]').each((_, el) => {
+                const $trait = $(el);
+                if ($trait.find(".chakra-text").first().text().trim().toLowerCase() === "style") {
+                    styleId = $trait.find("p.chakra-text").text().trim();
+                    return false;
+                }
+            });
+        }
+        
+        if (!styleId) {
+            const m = html.match(/Style<\/span>\s*<p[^>]*>([A-Z0-9\-]+)<\/p>/i);
+            if (m) styleId = m[1];
+        }
+
+        const sizes = [];
+        const sizeLabels = data.sizeLabels || [];
+        const priceLabels = data.priceLabels || [];
+        const maxLength = Math.max(sizeLabels.length, priceLabels.length);
+        for (let i = 0; i < maxLength; i++) {
+            const sizeLabel = sizeLabels[i]?.text?.trim() || "";
+            const priceText = priceLabels[i]?.text?.trim() || "";
+            if (!sizeLabel || !priceText) continue;
+            const sizeMatch = sizeLabel.match(/([\d.]+)$/);
+            if (!sizeMatch) continue;
+            const priceMatch = priceText.match(/CA?\$?([\d,]+)/);
+            if (!priceMatch) continue;
+            const priceCAD = parseInt(priceMatch[1].replace(/,/g, ""), 10);
+            sizes.push({ size: sizeMatch[1], price: priceCAD, priceCAD });
+        }
+        
+        sizes.sort((a, b) => parseFloat(a.size) - parseFloat(b.size));
+        
+        // Extract product name and image URL from HTML
+        const productName = $("h1").first().text().trim() || "Unknown Product";
+        let imageUrl = "";
+        const $img = $('[data-component="MediaContainer"] img[data-image-type="360"], [data-component="SingleImage"] img');
+        if ($img.length) {
+            const srcset = $img.attr("srcset") || "";
+            for (const line of srcset.split(",")) {
+                if (line.includes("3x")) {
+                    const u = line.match(/(https:\/\/images\.stockx\.com\/[^\s]+)/);
+                    if (u) {
+                        imageUrl = u[1].replace(/&amp;/g, "&");
+                        break;
+                    }
+                }
+            }
+            if (!imageUrl) {
+                for (const line of srcset.split(",")) {
+                    if (line.includes("2x")) {
+                        const u = line.match(/(https:\/\/images\.stockx\.com\/[^\s]+)/);
+                        if (u) {
+                            imageUrl = u[1].replace(/&amp;/g, "&");
+                            break;
+                        }
+                    }
+                }
+            }
+            if (!imageUrl) {
+                imageUrl = ($img.attr("src") || "").replace(/&amp;/g, "&");
+            }
+        }
+        if (!imageUrl) {
+            const $pi = $('img[alt*="product"], img[data-testid="product-image"]').first();
+            imageUrl = $pi.attr("src") || "";
+        }
+
+        console.log(`[StockX] BrowserQL extracted: Style ID: ${styleId || "NOT FOUND"}, ${sizes.length} sizes`);
+        
+        return { styleId, productName, productUrl, imageUrl, sizes };
+    } catch (error) {
+        if (error instanceof Error && error.message === "ABORTED") {
+            throw error;
+        }
+        // Only log non-429 errors (429s are expected rate limits)
+        if (error?.status !== 429 && !error?.message?.includes("429")) {
+            console.error("[StockX] BrowserQL error:", error);
+        }
+        throw error;
+    }
+}
+
+/**
  * Get Style ID AND prices from a StockX product page (standalone: launches and closes browser).
+ * Uses BrowserQL if configured, otherwise falls back to Puppeteer.
  */
 export async function getProductDataWithPrices(productUrl, signal) {
+    // Use BrowserQL if configured
+    if (isBrowserQLConfigured()) {
+        return await getProductDataWithPricesBrowserQL(productUrl, signal);
+    }
+
+    // Fallback to Puppeteer only if BrowserQL is not configured
     const browser = await launchBrowser();
     let page = null;
     try {

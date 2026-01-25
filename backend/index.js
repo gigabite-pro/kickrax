@@ -8,6 +8,7 @@ import { searchFlightClubBySku, scrapeFlightClubBySkuInPage } from "./scrapers/s
 import { searchStadiumGoodsBySku, scrapeStadiumGoodsBySkuInPage } from "./scrapers/sources/stadiumgoods.js";
 import { withSearchSession, acquireBrowserForProduct, releaseSessionForProduct } from "./search-session.js";
 import { createPage, isBrowserlessConfigured, getBrowserlessStealthRoute } from "./scrapers/browser.js";
+import { isBrowserQLConfigured } from "./scrapers/browserql.js";
 import { getTrendingCache, setTrendingCache, isRedisConfigured } from "./db/redis.js";
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -174,75 +175,91 @@ app.get("/api/product/all-prices", async (req, res) => {
         res.setHeader("Connection", "keep-alive");
         res.setHeader("X-Accel-Buffering", "no");
         res.flushHeaders?.();
-        const browser = await acquireBrowserForProduct();
-        const page1 = await createPage(browser, "STOCKX");
-        const stockxData = await fetchStockXProductInPage(page1, url, signal);
-        await page1.close().catch(() => { });
-        const styleId = stockxData.styleId || "";
-        if (signal.aborted)
-            return;
-        writeEvent("update", {
-            styleId: stockxData.styleId,
-            stockx: {
-                productName: stockxData.productName,
-                productUrl: stockxData.productUrl,
-                imageUrl: stockxData.imageUrl,
-                sizes: stockxData.sizes,
-            },
-        });
-        console.log(`[API] All-prices: StockX streamed (${stockxData.sizes?.length ?? 0} sizes)`);
-        const sku = styleId.trim().length >= 3 ? styleId : "";
-        const runInTab = async (fn, source) => {
-            const p = await createPage(browser, source);
-            try {
-                return await fn(p);
-            }
-            finally {
-                await p.close().catch(() => { });
-            }
-        };
+
         const runAndEmit = async (source, fn) => {
             try {
                 const data = await fn();
-                if (signal.aborted)
-                    return;
+                if (signal.aborted) return;
                 const payload = {};
                 if (source === "flightclub") {
                     const d = data;
-                    const sizes = d.sizes ?? [];
+                    const sizes = d?.sizes ?? [];
                     payload[source] = sizes.length
                         ? { productName: "", productUrl: sizes[0]?.url ?? "", imageUrl: "", sizes: sizes.map((s) => ({ size: s.size, price: s.price, priceCAD: s.priceCAD })) }
                         : null;
-                }
-                else if (source === "stadiumgoods") {
+                } else if (source === "stadiumgoods") {
                     const d = data;
-                    const sizes = d.sizes ?? [];
+                    const sizes = d?.sizes ?? [];
                     payload[source] = sizes.length
                         ? { productName: "", productUrl: sizes[0]?.url ?? "", imageUrl: "", sizes: sizes.map((s) => ({ size: s.size, price: s.price, priceCAD: s.priceCAD })) }
                         : null;
-                }
-                else {
+                } else {
                     payload[source] = data;
                 }
                 writeEvent("update", payload);
                 console.log(`[API] All-prices: ${source} streamed`);
-            }
-            catch (e) {
-                if (signal.aborted)
-                    return;
+            } catch (e) {
+                if (signal.aborted) return;
                 writeEvent("update", { [source]: null });
             }
         };
-        await Promise.all([
-            runAndEmit("goat", () => runInTab((p) => scrapeGoatBySkuInPage(p, sku, signal), "GOAT")),
-            runAndEmit("flightclub", () => runInTab((p) => scrapeFlightClubBySkuInPage(p, sku, signal), "FLIGHTCLUB")),
-            runAndEmit("stadiumgoods", () => runInTab((p) => scrapeStadiumGoodsBySkuInPage(p, sku, signal), "STADIUMGOODS")),
-        ]);
-        await runAndEmit("kickscrew", () => runInTab((p) => scrapeKickscrewBySkuInPage(p, sku, signal), "KICKSCREW"));
-        if (signal.aborted)
-            return;
+
+        if (isBrowserQLConfigured()) {
+            // BrowserQL: simple POST only, no browser
+            const stockxData = await fetchStockXProductInPage(null, url, signal);
+            const styleId = stockxData?.styleId ?? "";
+            if (signal.aborted) return;
+            writeEvent("update", {
+                styleId: stockxData.styleId,
+                stockx: {
+                    productName: stockxData.productName,
+                    productUrl: stockxData.productUrl,
+                    imageUrl: stockxData.imageUrl,
+                    sizes: stockxData.sizes,
+                },
+            });
+            console.log(`[API] All-prices: StockX streamed (${stockxData?.sizes?.length ?? 0} sizes)`);
+            const sku = styleId.trim().length >= 3 ? styleId : "";
+            await runAndEmit("goat", () => scrapeGoatBySkuInPage(null, sku, signal));
+            await runAndEmit("flightclub", () => scrapeFlightClubBySkuInPage(null, sku, signal));
+            await runAndEmit("stadiumgoods", () => scrapeStadiumGoodsBySkuInPage(null, sku, signal));
+            await runAndEmit("kickscrew", () => scrapeKickscrewBySkuInPage(null, sku, signal));
+        } else {
+            // Puppeteer: browser + tabs
+            const browser = await acquireBrowserForProduct();
+            const page1 = await createPage(browser, "STOCKX");
+            const stockxData = await fetchStockXProductInPage(page1, url, signal);
+            await page1.close().catch(() => {});
+            const styleId = stockxData?.styleId ?? "";
+            if (signal.aborted) return;
+            writeEvent("update", {
+                styleId: stockxData.styleId,
+                stockx: {
+                    productName: stockxData.productName,
+                    productUrl: stockxData.productUrl,
+                    imageUrl: stockxData.imageUrl,
+                    sizes: stockxData.sizes,
+                },
+            });
+            console.log(`[API] All-prices: StockX streamed (${stockxData?.sizes?.length ?? 0} sizes)`);
+            const sku = styleId.trim().length >= 3 ? styleId : "";
+            const runInTab = async (fn, source) => {
+                const p = await createPage(browser, source);
+                try {
+                    return await fn(p);
+                } finally {
+                    await p.close().catch(() => {});
+                }
+            };
+            await runAndEmit("goat", () => runInTab((p) => scrapeGoatBySkuInPage(p, sku, signal), "GOAT"));
+            await runAndEmit("flightclub", () => runInTab((p) => scrapeFlightClubBySkuInPage(p, sku, signal), "FLIGHTCLUB"));
+            await runAndEmit("stadiumgoods", () => runInTab((p) => scrapeStadiumGoodsBySkuInPage(p, sku, signal), "STADIUMGOODS"));
+            await runAndEmit("kickscrew", () => runInTab((p) => scrapeKickscrewBySkuInPage(p, sku, signal), "KICKSCREW"));
+        }
+
+        if (signal.aborted) return;
         const duration = Date.now() - startTime;
-        console.log(`[API] All-prices done in ${duration}ms (1 browser, 5 tabs)`);
+        console.log(`[API] All-prices done in ${duration}ms`);
         writeEvent("done", { duration, timestamp: new Date().toISOString() });
     }
     catch (error) {
@@ -256,9 +273,8 @@ app.get("/api/product/all-prices", async (req, res) => {
         }
     }
     finally {
-        await releaseSessionForProduct();
-        if (!res.writableEnded)
-            res.end();
+        if (!isBrowserQLConfigured()) await releaseSessionForProduct();
+        if (!res.writableEnded) res.end();
     }
 });
 /**

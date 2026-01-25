@@ -220,13 +220,13 @@ function setupPageLogging(page, source = "SCRAPER") {
                 seenBotUrls.add(urlKey);
                 blockingState.cloudflareChallenge = true;
                 blockingState.challengeUrls.push(url);
-                console.warn(`[${source}] ⚠️  Cloudflare challenge script: ${url.substring(0, 100)}`);
+                // Cloudflare challenge logging removed
             }
         } else if (url.includes("hcaptcha.com") || url.includes("recaptcha") || url.includes("/captcha/")) {
             if (!seenBotUrls.has(urlKey)) {
                 seenBotUrls.add(urlKey);
                 blockingState.captchaLoaded = true;
-                console.warn(`[${source}] ⚠️  Captcha system detected: ${url.substring(0, 100)}`);
+                // Captcha logging removed
             }
         }
     });
@@ -248,13 +248,7 @@ function setupPageLogging(page, source = "SCRAPER") {
         
         if (status >= 400) {
             blockingState.errorStatuses.push({ status, url: url.substring(0, 80) });
-            const logLevel = status >= 500 ? "error" : "warn";
-            console[logLevel](`[${source}] Response ${status} ${res.statusText()} | ${url.substring(0, 80)}`);
-            
-            if (status === 403 || status === 503) {
-                const cfRay = headers["cf-ray"];
-                console.error(`[${source}] 🚫 BLOCKED: HTTP ${status} | CF-Ray: ${cfRay || "N/A"} | ${url.substring(0, 80)}`);
-            }
+            // Error status logging removed
         }
         
         if (isChallenge) {
@@ -262,24 +256,18 @@ function setupPageLogging(page, source = "SCRAPER") {
             if (!blockingState.challengeUrls.includes(url)) {
                 blockingState.challengeUrls.push(url);
             }
-            console.error(`[${source}] 🚫 CLOUDFLARE CHALLENGE: Status ${status} | ${url.substring(0, 80)}`);
+            // Cloudflare challenge logging removed
         }
         
         if (isCaptcha && status === 200) {
             blockingState.captchaLoaded = true;
-            console.warn(`[${source}] ⚠️  Captcha loaded: ${url.substring(0, 80)}`);
+            // Captcha logging removed
         }
     });
 
     // Log navigation failures (only important ones)
     page.on("requestfailed", (req) => {
-        const failure = req.failure();
-        const url = req.url();
-        // Only log failures to the main domain, not third-party analytics
-        if (url.includes("challenge") || url.includes("captcha") || 
-            (!url.includes("google.com") && !url.includes("analytics") && !url.includes("monorail"))) {
-            console.error(`[${source}] ❌ Request failed: ${req.method()} ${url.substring(0, 80)} | Error: ${failure?.errorText || "Unknown"}`);
-        }
+        // Request failed logging removed
     });
 
     // Log frame navigation (detect redirects to challenge pages)
@@ -293,7 +281,7 @@ function setupPageLogging(page, source = "SCRAPER") {
                 title.includes("Just a moment") || title.includes("Checking your browser")) {
                 blockingState.cloudflareChallenge = true;
                 blockingState.blockedPages.push({ url, reason: "Cloudflare challenge page" });
-                console.error(`[${source}] 🚫 CLOUDFLARE CHALLENGE PAGE! URL: ${url.substring(0, 100)} | Title: "${title}"`);
+                // Cloudflare challenge page logging removed
             }
             
             // Check for other bot detection pages
@@ -302,7 +290,7 @@ function setupPageLogging(page, source = "SCRAPER") {
                 bodyText.includes("Bot detected") ||
                 bodyText.includes("Please verify you are human")) {
                 blockingState.blockedPages.push({ url, reason: "Bot detection page" });
-                console.error(`[${source}] 🚫 BOT DETECTION PAGE: ${url.substring(0, 80)}`);
+                // Bot detection page logging removed
             }
         }
     });
@@ -331,11 +319,7 @@ export function logBlockingSummary(page, source = "SCRAPER") {
         issues.push(`HTTP errors: ${Object.entries(errorCounts).map(([s, c]) => `${s}(${c})`).join(", ")}`);
     }
     
-    if (issues.length > 0) {
-        console.warn(`[${source}] ⚠️  Bot detection summary: ${issues.join("; ")}`);
-    } else {
-        console.log(`[${source}] ✓ No blocking detected`);
-    }
+    // Bot detection summary logging removed
 }
 
 /**
@@ -438,7 +422,7 @@ export async function waitForCloudflareChallenge(page, source = "SCRAPER", maxWa
             return false;
         }
         
-        console.log(`[${source}] ⏳ Cloudflare challenge detected, waiting for completion (max ${maxWaitMs}ms)...`);
+        // Cloudflare challenge wait logging removed
         const startTime = Date.now();
         
         // Wait for challenge to complete - check every 500ms
@@ -459,7 +443,7 @@ export async function waitForCloudflareChallenge(page, source = "SCRAPER", maxWa
                 
                 if (!stillChallenging) {
                     const waitTime = Date.now() - startTime;
-                    console.log(`[${source}] ✓ Cloudflare challenge completed after ${waitTime}ms`);
+                    // Cloudflare challenge completion logging removed
                     // Wait a bit more for page to fully load
                     await new Promise(resolve => setTimeout(resolve, 1000));
                     return true;
@@ -470,7 +454,7 @@ export async function waitForCloudflareChallenge(page, source = "SCRAPER", maxWa
         }
         
         const waitTime = Date.now() - startTime;
-        console.warn(`[${source}] ⚠️  Cloudflare challenge still present after ${waitTime}ms`);
+        // Cloudflare challenge timeout logging removed
         return true; // Challenge was present, even if not resolved
     } catch (e) {
         return false;
@@ -514,7 +498,7 @@ export async function navigateWithLogging(page, url, options = {}, source = "SCR
         console.log(`[${source}] Navigation: ${status || "N/A"} | ${duration}ms | ${finalUrl.substring(0, 100)}`);
         
         if (redirected && (finalUrl.includes("challenge") || finalUrl.includes("captcha"))) {
-            console.error(`[${source}] 🚫 Redirected to challenge page: ${finalUrl.substring(0, 100)}`);
+            // Redirected to challenge page logging removed
             
             // If unblock is enabled and we got a challenge, try unblock API
             if (useUnblock && BROWSERLESS_API_TOKEN) {
@@ -554,7 +538,7 @@ export async function navigateWithLogging(page, url, options = {}, source = "SCR
                 
                 if (title.includes("Just a moment") || title.includes("Checking your browser") ||
                     bodyText.includes("Please wait while we verify")) {
-                    console.log(`[${source}] 🔄 Challenge still present, trying Unblock API...`);
+                    // Challenge still present logging removed
                     const { browser: unblockBrowser, page: unblockPage } = await unblockUrl(url, source);
                     
                     if (unblockPage) {
@@ -586,7 +570,7 @@ export async function navigateWithLogging(page, url, options = {}, source = "SCR
             if (title.includes("Just a moment") || title.includes("Checking your browser") || 
                 bodyText.includes("Please wait while we verify") ||
                 (bodyText.includes("Cloudflare") && bodyText.includes("checking"))) {
-                console.error(`[${source}] 🚫 CLOUDFLARE CHALLENGE PAGE: Title="${title}" | Body preview: ${bodyText.substring(0, 100)}`);
+                // Cloudflare challenge page logging removed
                 if (page._blockingState) {
                     page._blockingState.cloudflareChallenge = true;
                     page._blockingState.blockedPages.push({ url: finalUrl, reason: "Cloudflare challenge page content" });
@@ -595,7 +579,7 @@ export async function navigateWithLogging(page, url, options = {}, source = "SCR
             
             if (bodyText.includes("Access Denied") || bodyText.includes("Bot detected") ||
                 bodyText.includes("403 Forbidden") || bodyText.includes("Blocked")) {
-                console.error(`[${source}] 🚫 BLOCKED PAGE: Title="${title}"`);
+                // Blocked page logging removed
                 if (page._blockingState) {
                     page._blockingState.blockedPages.push({ url: finalUrl, reason: "Blocked page content" });
                 }

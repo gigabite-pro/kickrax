@@ -1,14 +1,8 @@
 import { searchStockX } from "./sources/stockx.js";
 import { searchGOAT } from "./sources/goat.js";
-import { searchGrailed } from "./sources/grailed.js";
 import { searchFlightClub } from "./sources/flight-club.js";
-import { searchStadiumGoods } from "./sources/stadium-goods.js";
-import { searchLivestock } from "./sources/livestock.js";
-import { searchHaven } from "./sources/haven.js";
-import { searchCapsule } from "./sources/capsule.js";
-import { searchExclucity } from "./sources/exclucity.js";
-import { searchNRML } from "./sources/nrml.js";
 import { searchKicksCrew } from "./sources/kickscrew.js";
+import { searchStadiumGoods } from "./sources/stadiumgoods.js";
 import { SCRAPER_REGISTRY } from "./registry.js";
 export async function searchAllSources(query) {
     const errors = [];
@@ -16,15 +10,9 @@ export async function searchAllSources(query) {
     const scraperFunctions = {
         stockx: searchStockX,
         goat: searchGOAT,
-        grailed: searchGrailed,
         "flight-club": searchFlightClub,
-        "stadium-goods": searchStadiumGoods,
-        livestock: searchLivestock,
-        haven: searchHaven,
-        capsule: searchCapsule,
-        exclucity: searchExclucity,
-        nrml: searchNRML,
         kickscrew: searchKicksCrew,
+        "stadium-goods": searchStadiumGoods,
     };
     const scraperPromises = enabledScrapers.map(async (scraper) => {
         const fn = scraperFunctions[scraper.id];
