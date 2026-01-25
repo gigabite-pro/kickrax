@@ -1,6 +1,6 @@
 import { SOURCES } from "../../types.js";
 import { generateListingId, USD_TO_CAD_RATE } from "../types.js";
-import { launchBrowser, createPage, checkAbort, sleepWithAbort } from "../browser.js";
+import { launchBrowser, createPage, checkAbort, sleepWithAbort, logBlockingSummary } from "../browser.js";
 /**
  * Scrape KicksCrew by SKU using an existing page. Does not close page/browser.
  */
@@ -50,97 +50,11 @@ export async function scrapeKickscrewBySkuInPage(page, sku, signal) {
             return null;
         }
         console.log(`[KICKSCREW] Found: ${productUrl}`);
-        // Step 2: Navigate to product page
-        try {
-            checkAbort(signal, 'KICKSCREW');
-            await page.goto(productUrl, { waitUntil: "networkidle0", timeout: 30000 });
-        }
-        catch (e) {
-            if (e instanceof Error && e.message === 'ABORTED')
-                throw e;
-            // Continue even if timeout
-        }
-        // Wait for page to fully render
-        await sleepWithAbort(4000, signal, 'KICKSCREW');
-        // Get product name
-        const productName = await page.evaluate(() => {
-            return document.querySelector('h1')?.textContent?.trim() || 'Unknown Product';
-        });
-        console.log(`[KICKSCREW] Product: ${productName}`);
-        // Try multiple selectors for size picker
-        const sizePickerSelectors = [
-            '.size-picker',
-            'button[aria-label*="size" i]',
-            'button[aria-label*="Size" i]',
-            '[data-testid="size-picker"]',
-            'button:has-text("Select Size")',
-            '.size-selector',
-            '[class*="size-picker"]',
-            '[class*="SizePicker"]',
-        ];
-        let sizePickerClicked = false;
-        for (const selector of sizePickerSelectors) {
-            try {
-                await page.waitForSelector(selector, { timeout: 3000 });
-                await page.click(selector);
-                sizePickerClicked = true;
-                console.log(`[KICKSCREW] Clicked size picker: ${selector}`);
-                break;
-            }
-            catch (e) {
-                // Try next selector
-            }
-        }
-        if (!sizePickerClicked) {
-            // Try clicking by evaluating directly
-            const clicked = await page.evaluate(() => {
-                // Look for any button that might be a size picker
-                const buttons = Array.from(document.querySelectorAll('button'));
-                for (const btn of buttons) {
-                    const text = btn.textContent?.toLowerCase() || '';
-                    const aria = btn.getAttribute('aria-label')?.toLowerCase() || '';
-                    const className = btn.className?.toLowerCase() || '';
-                    if (text.includes('size') || aria.includes('size') || className.includes('size')) {
-                        btn.click();
-                        return true;
-                    }
-                }
-                return false;
-            });
-            if (clicked) {
-                sizePickerClicked = true;
-                console.log(`[KICKSCREW] Clicked size picker via evaluate`);
-            }
-        }
-        if (!sizePickerClicked) {
-            console.log("[KICKSCREW] Size picker not found, trying to extract sizes directly");
-        }
-        // Wait for dropdown to appear
-        await sleepWithAbort(2000, signal, 'KICKSCREW');
-        // Wait for size options
-        try {
-            await page.waitForSelector('[data-testid^="size-option-"]', { timeout: 5000 });
-        }
-        catch (e) {
-            // Try alternative size option selectors
-            try {
-                await page.waitForSelector('li[role="menuitem"]', { timeout: 3000 });
-            }
-            catch (e2) {
-                // Continue anyway
-            }
-        }
-        // Extract sizes
-        const extractedData = await page.evaluate(() => {
-            // Try primary selector
+
+        const extractSizesInPage = () => page.evaluate(() => {
             let sizeItems = Array.from(document.querySelectorAll('[data-testid^="size-option-"]'));
-            // If no items found, try alternative selectors
-            if (sizeItems.length === 0) {
-                sizeItems = Array.from(document.querySelectorAll('li[role="menuitem"]'));
-            }
-            if (sizeItems.length === 0) {
-                sizeItems = Array.from(document.querySelectorAll('ol li'));
-            }
+            if (sizeItems.length === 0) sizeItems = Array.from(document.querySelectorAll('li[role="menuitem"]'));
+            if (sizeItems.length === 0) sizeItems = Array.from(document.querySelectorAll('ol li'));
             const sizes = [];
             sizeItems.forEach((item) => {
                 const isAvailable = item.getAttribute("data-available") !== "false";
@@ -148,18 +62,61 @@ export async function scrapeKickscrewBySkuInPage(page, sku, signal) {
                 const sizeText = sizeEl?.textContent?.trim() || item.textContent?.trim() || "";
                 const priceEl = item.querySelector(".text-sm:not(.font-semibold), .text-xs") || item.querySelector('[class*="price"]');
                 let priceText = priceEl?.textContent?.trim() || null;
-                if (priceText === "$--" || priceText?.includes("--")) {
-                    priceText = null;
-                }
+                if (priceText === "$--" || priceText?.includes("--")) priceText = null;
                 const sizeMatch = sizeText.match(/([\d.]+)/);
                 const size = sizeMatch ? sizeMatch[1] : sizeText;
-                if (size && /^\d/.test(size)) {
-                    sizes.push({ size, price: isAvailable ? priceText : null, available: isAvailable });
-                }
+                if (size && /^\d/.test(size)) sizes.push({ size, price: isAvailable ? priceText : null, available: isAvailable });
             });
             const imageEl = document.querySelector('img[alt*="product"], img[src*="cdn.kickscrew"]');
             return { sizes, imageUrl: imageEl?.src || "", itemCount: sizeItems.length };
         });
+
+        const isDetached = (e) => e instanceof Error && /detached|Target closed|Frame detached|Execution context is not available in detached/i.test(e.message);
+
+        let productName;
+        let extractedData;
+        try {
+            checkAbort(signal, 'KICKSCREW');
+            await page.goto(productUrl, { waitUntil: "networkidle0", timeout: 30000 });
+            await sleepWithAbort(4000, signal, 'KICKSCREW');
+            productName = await page.evaluate(() => document.querySelector('h1')?.textContent?.trim() || 'Unknown Product');
+            console.log(`[KICKSCREW] Product: ${productName}`);
+
+            const sizePickerSelectors = ['.size-picker', 'button[aria-label*="size" i]', 'button[aria-label*="Size" i]', '[data-testid="size-picker"]', 'button:has-text("Select Size")', '.size-selector', '[class*="size-picker"]', '[class*="SizePicker"]'];
+            let sizePickerClicked = false;
+            for (const selector of sizePickerSelectors) {
+                try {
+                    await page.waitForSelector(selector, { timeout: 3000 });
+                    await page.click(selector);
+                    sizePickerClicked = true;
+                    console.log(`[KICKSCREW] Clicked size picker: ${selector}`);
+                    break;
+                } catch (_) {}
+            }
+            if (!sizePickerClicked) console.log("[KICKSCREW] Size picker not found, trying to extract sizes directly");
+            await sleepWithAbort(2000, signal, 'KICKSCREW');
+            try { await page.waitForSelector('[data-testid^="size-option-"]', { timeout: 5000 }); } catch (_) {}
+            try { await page.waitForSelector('li[role="menuitem"]', { timeout: 3000 }); } catch (_) {}
+            extractedData = await extractSizesInPage();
+        } catch (e) {
+            if (e instanceof Error && e.message === 'ABORTED') throw e;
+            if (!isDetached(e)) throw e;
+            console.log("[KICKSCREW] Frame detached, re-loading product page and extracting without size picker");
+            try {
+                await page.goto(productUrl, { waitUntil: "domcontentloaded", timeout: 15000 });
+                await sleepWithAbort(2000, signal, 'KICKSCREW');
+                productName = await page.evaluate(() => document.querySelector('h1')?.textContent?.trim() || 'Unknown Product');
+                extractedData = await extractSizesInPage();
+            } catch (retryErr) {
+                if (retryErr instanceof Error && retryErr.message === 'ABORTED') throw retryErr;
+                console.error("[KICKSCREW] Retry after detached failed:", retryErr);
+                return null;
+            }
+        }
+        if (!extractedData) {
+            console.log("[KICKSCREW] No extraction data, skipping");
+            return null;
+        }
         console.log(`[KICKSCREW] Found ${extractedData.itemCount} size items in DOM`);
         // Convert to our format
         const sizes = [];
@@ -182,6 +139,7 @@ export async function scrapeKickscrewBySkuInPage(page, sku, signal) {
         if (sizes.length > 0) {
             console.log(`[KICKSCREW] Sizes: ${sizes.map(s => `${s.size}=$${s.priceCAD}`).join(', ')}`);
         }
+        logBlockingSummary(page, "KICKSCREW");
         return {
             productName,
             productUrl,
@@ -193,6 +151,7 @@ export async function scrapeKickscrewBySkuInPage(page, sku, signal) {
         if (error instanceof Error && error.message === "ABORTED")
             throw error;
         console.error("[KICKSCREW] Error:", error);
+        logBlockingSummary(page, "KICKSCREW");
         return null;
     }
 }

@@ -7,12 +7,21 @@ import { searchKickscrewBySku, scrapeKickscrewBySkuInPage } from "./scrapers/sou
 import { searchFlightClubBySku, scrapeFlightClubBySkuInPage } from "./scrapers/sources/flight-club.js";
 import { searchStadiumGoodsBySku, scrapeStadiumGoodsBySkuInPage } from "./scrapers/sources/stadiumgoods.js";
 import { withSearchSession, acquireBrowserForProduct, releaseSessionForProduct } from "./search-session.js";
-import { createPage, isBrowserlessConfigured } from "./scrapers/browser.js";
+import { createPage, isBrowserlessConfigured, getBrowserlessStealthRoute } from "./scrapers/browser.js";
 import { getTrendingCache, setTrendingCache, isRedisConfigured } from "./db/redis.js";
 const app = express();
 const PORT = process.env.PORT || 3001;
 app.use(cors());
 app.use(express.json());
+
+/** Extract a short message from Error, ErrorEvent (e.g. ws), or unknown. */
+function toErrorMessage(err) {
+    if (err instanceof Error) return err.message;
+    const inner = err?.error ?? err?.cause;
+    if (inner instanceof Error) return inner.message;
+    if (typeof err?.message === "string") return err.message;
+    return String(err);
+}
 // Health check
 app.get("/api/health", (req, res) => {
     res.json({ status: "ok", timestamp: new Date().toISOString() });
@@ -166,7 +175,7 @@ app.get("/api/product/all-prices", async (req, res) => {
         res.setHeader("X-Accel-Buffering", "no");
         res.flushHeaders?.();
         const browser = await acquireBrowserForProduct();
-        const page1 = await createPage(browser);
+        const page1 = await createPage(browser, "STOCKX");
         const stockxData = await fetchStockXProductInPage(page1, url, signal);
         await page1.close().catch(() => { });
         const styleId = stockxData.styleId || "";
@@ -183,8 +192,8 @@ app.get("/api/product/all-prices", async (req, res) => {
         });
         console.log(`[API] All-prices: StockX streamed (${stockxData.sizes?.length ?? 0} sizes)`);
         const sku = styleId.trim().length >= 3 ? styleId : "";
-        const runInTab = async (fn) => {
-            const p = await createPage(browser);
+        const runInTab = async (fn, source) => {
+            const p = await createPage(browser, source);
             try {
                 return await fn(p);
             }
@@ -225,11 +234,11 @@ app.get("/api/product/all-prices", async (req, res) => {
             }
         };
         await Promise.all([
-            runAndEmit("goat", () => runInTab((p) => scrapeGoatBySkuInPage(p, sku, signal))),
-            runAndEmit("kickscrew", () => runInTab((p) => scrapeKickscrewBySkuInPage(p, sku, signal))),
-            runAndEmit("flightclub", () => runInTab((p) => scrapeFlightClubBySkuInPage(p, sku, signal))),
-            runAndEmit("stadiumgoods", () => runInTab((p) => scrapeStadiumGoodsBySkuInPage(p, sku, signal))),
+            runAndEmit("goat", () => runInTab((p) => scrapeGoatBySkuInPage(p, sku, signal), "GOAT")),
+            runAndEmit("flightclub", () => runInTab((p) => scrapeFlightClubBySkuInPage(p, sku, signal), "FLIGHTCLUB")),
+            runAndEmit("stadiumgoods", () => runInTab((p) => scrapeStadiumGoodsBySkuInPage(p, sku, signal), "STADIUMGOODS")),
         ]);
+        await runAndEmit("kickscrew", () => runInTab((p) => scrapeKickscrewBySkuInPage(p, sku, signal), "KICKSCREW"));
         if (signal.aborted)
             return;
         const duration = Date.now() - startTime;
@@ -238,8 +247,12 @@ app.get("/api/product/all-prices", async (req, res) => {
     }
     catch (error) {
         if (!signal.aborted) {
-            console.error("[API] All-prices error:", error instanceof Error ? error.message : error);
-            writeEvent("error", { message: error instanceof Error ? error.message : "Unknown error" });
+            const msg = toErrorMessage(error);
+            console.error("[API] All-prices error:", msg);
+            const friendly = /429|Too Many Requests/i.test(msg)
+                ? "Browserless rate limit (429). Please retry in a minute."
+                : msg;
+            writeEvent("error", { message: friendly });
         }
     }
     finally {
@@ -534,7 +547,9 @@ app.listen(PORT, () => {
     console.log(`🚀 Server running on http://localhost:${PORT}`);
     console.log(`\nConfig:`);
     console.log(`  Redis (trending cache): ${isRedisConfigured() ? "✓ configured" : "✗ not configured"}`);
-    console.log(`  Browserless (scraping): ${isBrowserlessConfigured() ? "✓ configured" : "✗ not configured"}`);
+    const bl = isBrowserlessConfigured();
+    const blRoute = getBrowserlessStealthRoute();
+    console.log(`  Browserless (scraping): ${bl ? (blRoute ? `✓ configured (stealth: /${blRoute})` : "✓ configured") : "✗ not configured"}`);
     console.log(`\nEndpoints:`);
     console.log(`  GET /api/search?q=jordan+1        - Search StockX`);
     console.log(`  GET /api/product/style?url=...    - Get Style ID from product page`);
