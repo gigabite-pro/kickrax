@@ -86,7 +86,7 @@ async function unblockUrl(url, source = "SCRAPER") {
         : "chromium/unblock";
     const unblockURL = `${httpBase}/${unblockRoute}?token=${BROWSERLESS_API_TOKEN}`;
     
-    console.log(`[${source}] 🔓 Unblocking URL via Browserless API: ${url.substring(0, 100)}`);
+    console.log(`[${source}] 🔓 Unblocking URL via Browserless API: ${url}`);
     
     try {
         const response = await fetch(unblockURL, {

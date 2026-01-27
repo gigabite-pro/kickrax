@@ -15,6 +15,41 @@ const PORT = process.env.PORT || 3001;
 app.use(cors());
 app.use(express.json());
 
+// Request deduplication: prevent duplicate requests for the same URL within 5 seconds
+const activeRequests = new Map();
+const REQUEST_DEDUP_WINDOW_MS = 5000;
+
+async function deduplicateRequest(url, requestFn) {
+    const now = Date.now();
+    const existing = activeRequests.get(url);
+    
+    if (existing && (now - existing.startTime) < REQUEST_DEDUP_WINDOW_MS) {
+        console.log(`[API] Duplicate request detected for ${url}, reusing existing request (${Math.round((now - existing.startTime) / 1000)}s ago)`);
+        try {
+            // Wait for the existing request to complete
+            return await existing.promise;
+        } catch (error) {
+            // If the existing request failed, remove it and allow retry
+            activeRequests.delete(url);
+            throw error;
+        }
+    }
+    
+    // Create new request
+    console.log(`[API] Starting new request for ${url}`);
+    const promise = requestFn();
+    activeRequests.set(url, { promise, startTime: now });
+    
+    try {
+        const result = await promise;
+        activeRequests.delete(url);
+        return result;
+    } catch (error) {
+        activeRequests.delete(url);
+        throw error;
+    }
+}
+
 /** Extract a short message from Error, ErrorEvent (e.g. ws), or unknown. */
 function toErrorMessage(err) {
     if (err instanceof Error) return err.message;
@@ -155,6 +190,7 @@ app.get("/api/product/style", async (req, res) => {
  */
 app.get("/api/product/all-prices", async (req, res) => {
     const url = req.query.url;
+    console.log(`[API] /api/product/all-prices called with URL: ${url}`);
     if (!url || !url.includes("stockx.com")) {
         return res.status(400).json({ error: "Valid StockX URL required" });
     }
@@ -206,7 +242,8 @@ app.get("/api/product/all-prices", async (req, res) => {
 
         if (isBrowserQLConfigured()) {
             // BrowserQL: simple POST only, no browser
-            const stockxData = await fetchStockXProductInPage(null, url, signal);
+            console.log(`[API] Calling fetchStockXProductInPage for URL: ${url}`);
+            const stockxData = await deduplicateRequest(url, () => fetchStockXProductInPage(null, url, signal));
             const styleId = stockxData?.styleId ?? "";
             if (signal.aborted) return;
             writeEvent("update", {
@@ -221,9 +258,9 @@ app.get("/api/product/all-prices", async (req, res) => {
             console.log(`[API] All-prices: StockX streamed (${stockxData?.sizes?.length ?? 0} sizes)`);
             const sku = styleId.trim().length >= 3 ? styleId : "";
             await runAndEmit("goat", () => scrapeGoatBySkuInPage(null, sku, signal));
-            await runAndEmit("flightclub", () => scrapeFlightClubBySkuInPage(null, sku, signal));
             await runAndEmit("stadiumgoods", () => scrapeStadiumGoodsBySkuInPage(null, sku, signal));
             await runAndEmit("kickscrew", () => scrapeKickscrewBySkuInPage(null, sku, signal));
+            await runAndEmit("flightclub", () => scrapeFlightClubBySkuInPage(null, sku, signal));
         } else {
             // Puppeteer: browser + tabs
             const browser = await acquireBrowserForProduct();
@@ -252,9 +289,9 @@ app.get("/api/product/all-prices", async (req, res) => {
                 }
             };
             await runAndEmit("goat", () => runInTab((p) => scrapeGoatBySkuInPage(p, sku, signal), "GOAT"));
-            await runAndEmit("flightclub", () => runInTab((p) => scrapeFlightClubBySkuInPage(p, sku, signal), "FLIGHTCLUB"));
             await runAndEmit("stadiumgoods", () => runInTab((p) => scrapeStadiumGoodsBySkuInPage(p, sku, signal), "STADIUMGOODS"));
             await runAndEmit("kickscrew", () => runInTab((p) => scrapeKickscrewBySkuInPage(p, sku, signal), "KICKSCREW"));
+            await runAndEmit("flightclub", () => runInTab((p) => scrapeFlightClubBySkuInPage(p, sku, signal), "FLIGHTCLUB"));
         }
 
         if (signal.aborted) return;

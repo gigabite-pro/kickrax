@@ -110,6 +110,7 @@ export default function Product() {
 
   // AbortController for canceling requests on unmount
   const abortControllerRef = useRef<AbortController | null>(null);
+  const isFetchingRef = useRef<boolean>(false);
 
   // Cleanup on unmount - abort all pending requests
   useEffect(() => {
@@ -117,6 +118,7 @@ export default function Product() {
       if (abortControllerRef.current) {
         abortControllerRef.current.abort();
       }
+      isFetchingRef.current = false;
     };
   }, []);
 
@@ -137,6 +139,13 @@ export default function Product() {
       setStyleIdLoading(false);
       return;
     }
+
+    // Prevent duplicate requests (React StrictMode in dev runs effects twice)
+    if (isFetchingRef.current) {
+      console.log('[Product] Already fetching, skipping duplicate request');
+      return;
+    }
+    isFetchingRef.current = true;
 
     abortControllerRef.current = new AbortController();
     const signal = abortControllerRef.current.signal;
@@ -248,10 +257,15 @@ export default function Product() {
           stadiumgoods: { loading: false, data: null, error: true },
         }));
         setStyleIdLoading(false);
+      } finally {
+        isFetchingRef.current = false;
       }
     })();
 
-    return () => { abortControllerRef.current?.abort(); };
+    return () => { 
+      abortControllerRef.current?.abort();
+      isFetchingRef.current = false;
+    };
   }, [product?.stockxUrl]);
 
   // Check if any source is still loading

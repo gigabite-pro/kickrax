@@ -160,134 +160,128 @@ export async function searchGoatBySkuBrowserQL(sku, signal) {
     checkAbort(signal, "GOAT");
     console.log(`[GOAT] Using BrowserQL to search for SKU: ${sku}`);
 
-    const skuLower = sku.toLowerCase().replace(/-/g, "");
     const searchUrl = `https://www.goat.com/en-ca/search?query=${encodeURIComponent(sku)}&pageNumber=1`;
 
-    // BrowserQL mutation to search and extract product data
     const mutation = `
-        mutation ScrapeGOAT($searchUrl: String!, $skuLower: String!) {
+        mutation ScrapeGOAT($searchUrl: String!) {
+            viewport(width: 1366, height: 768) {
+                width
+                height
+                time
+            }
             goto(url: $searchUrl, waitUntil: networkIdle) {
                 status
             }
-            wait1: waitForTimeout(time: 2000) {
+            waitForSearch: waitForTimeout(time: 3000) {
                 time
             }
-            # Extract product links
-            productLinks: mapSelector(selector: "a[href*='/sneakers/']", wait: true) {
-                href: attribute(name: "href") {
-                    value
-                }
+            waitForGrid: waitForSelector(selector: "a[class*='GridCellLink__Link'][href*='/sneakers/']", timeout: 10000) {
+                time
             }
-            # Get HTML for product link matching
-            html: html(selector: "body") {
-                html
+            waitForLayoutStable: waitForTimeout(time: 3000) {
+                time
+            }
+            clickFirstProduct: click(selector: "a[class*='GridCellLink__Link'][href*='/sneakers/']") {
+                x
+                y
+            }
+            waitForNavigation: waitForTimeout(time: 2000) {
+                time
+            }
+            waitForProductPage: waitForTimeout(time: 5000) {
+                time
+            }
+            waitForBuyBar: waitForSelector(selector: "[data-qa='buy_bar_desktop']", timeout: 10000) {
+                time
+            }
+            waitForStability: waitForTimeout(time: 3000) {
+                time
+            }
+            waitForSwiper: waitForSelector(selector: "[data-qa='buy_bar_desktop'] .swiper-wrapper", timeout: 5000) {
+                time
+            }
+            waitForSwiperStable: waitForTimeout(time: 2000) {
+                time
+            }
+            clickSwiper: click(selector: "[data-qa='buy_bar_desktop'] .swiper-wrapper") {
+                x
+                y
+            }
+            waitForSizes: waitForTimeout(time: 1500) {
+                time
+            }
+            waitForBuyBarItems: waitForSelector(selector: "[data-qa='buy_bar_item_desktop']", timeout: 5000) {
+                time
+            }
+            sizeTexts: querySelectorAll(selector: "[data-qa^='buy_bar_size_']") {
+                text: innerText
+            }
+            priceTexts: querySelectorAll(selector: "[data-qa^='buy_bar_price_size_']") {
+                text: innerText
+            }
+            oosTexts: querySelectorAll(selector: "[data-qa='buy_bar_oos']") {
+                text: innerText
+            }
+            productName: querySelector(selector: "h1[data-qa='product_display_name'], h1") {
+                text: innerText
+            }
+            productImageSrc: querySelector(selector: "img[alt]") {
+                html: outerHTML
+            }
+            currentUrl: url {
+                url
             }
         }
     `;
 
     try {
-        const data = await executeBrowserQL(mutation, { searchUrl, skuLower });
+        const data = await executeBrowserQL(mutation, { searchUrl });
         checkAbort(signal, "GOAT");
 
-        // Find product URL from HTML
-        const html = data.html?.html || "";
-        const $ = cheerio.load(html);
-        let productUrl = null;
+        // Deduplicate sizes and prices
+        const uniqueSizes = [...new Set(data.sizeTexts.map(s => s.text))];
+        const uniquePrices = [...new Set(data.priceTexts.map(p => p.text))];
 
-        $('a[href*="/sneakers/"]').each((_, el) => {
-            const href = $(el).attr("href") || "";
-            if (href.toLowerCase().replace(/-/g, "").includes(skuLower)) {
-                productUrl = href.startsWith("http") ? href : `https://www.goat.com${href}`;
-                return false;
-            }
+        // Match sizes with prices (need to handle OOS items)
+        const parsedSizes = uniqueSizes.map(size => {
+            // Find matching price by index
+            const sizeIndex = data.sizeTexts.findIndex(s => s.text === size);
+            const priceText = sizeIndex >= 0 && sizeIndex < data.priceTexts.length 
+                ? data.priceTexts[sizeIndex]?.text 
+                : null;
+            const isOOS = !priceText;
+            
+            return {
+                size: size,
+                price: priceText || 'Offer',
+                outOfStock: isOOS
+            };
         });
 
-        if (!productUrl) {
-            console.log("[GOAT] No product found");
-            return null;
-        }
-
-        console.log(`[GOAT] Found: ${productUrl}`);
-
-        // Second mutation to get product page data
-        const productMutation = `
-            mutation ScrapeGOATProduct($productUrl: String!) {
-                goto(url: $productUrl, waitUntil: networkIdle) {
-                    status
-                }
-                wait1: waitForTimeout(time: 2000) {
-                    time
-                }
-                wait2: waitForTimeout(time: 1500) {
-                    time
-                }
-                # Click swiper wrapper if present
-                clickSwiper: click(selector: "[data-qa='buy_bar_desktop'] .swiper-wrapper") {
-                    x
-                    y
-                }
-                wait3: waitForTimeout(time: 1000) {
-                    time
-                }
-                # Wait for size items
-                waitForSelector(selector: "[data-qa='buy_bar_item_desktop']", timeout: 5000) {
-                    time
-                }
-                # Extract sizes and prices
-                sizes: mapSelector(selector: "[data-qa='buy_bar_item_desktop']", wait: true) {
-                    sizeText: mapSelector(selector: "[data-qa^='buy_bar_size_']") {
-                        text: innerText
-                    }
-                    priceText: mapSelector(selector: "[data-qa^='buy_bar_price_size_']") {
-                        text: innerText
-                    }
-                    oosElement: mapSelector(selector: "[data-qa='buy_bar_oos']") {
-                        text: innerText
-                    }
-                }
-                # Get product name and image
-                productName: mapSelector(selector: "h1[data-qa='product_display_name'], h1") {
-                    text: innerText
-                }
-                productImage: mapSelector(selector: "[data-qa='grid_cell_product_image'] img") {
-                    src: attribute(name: "src") {
-                        value
-                    }
-                }
-            }
-        `;
-
-        const productData = await executeBrowserQL(productMutation, { productUrl });
-        checkAbort(signal, "GOAT");
-
-        // Process sizes
+        // Process sizes - convert to our format
         const sizes = [];
-        const sizesData = productData.sizes || [];
-        const seen = new Set();
-
-        for (const item of sizesData) {
-            const sizeText = item.sizeText?.[0]?.text?.trim() || "";
-            const priceText = item.priceText?.[0]?.text?.trim() || null;
-            const isOOS = (item.oosElement?.length > 0);
-
-            if (sizeText && !seen.has(sizeText) && !isOOS && priceText) {
-                seen.add(sizeText);
-                const priceMatch = priceText.match(/C?\$?([\d,]+)/);
-                if (priceMatch) {
-                    const priceCAD = parseInt(priceMatch[1].replace(/,/g, ""));
-                    sizes.push({
-                        size: sizeText,
-                        price: Math.round(priceCAD / USD_TO_CAD_RATE),
-                        priceCAD,
-                    });
-                }
+        for (const item of parsedSizes) {
+            if (item.outOfStock) continue; // Skip OOS items
+            
+            const priceText = item.price;
+            const priceMatch = priceText.match(/C?\$?([\d,]+)/);
+            if (priceMatch) {
+                const priceCAD = parseInt(priceMatch[1].replace(/,/g, ""), 10);
+                sizes.push({
+                    size: item.size.trim(),
+                    price: Math.round(priceCAD / USD_TO_CAD_RATE),
+                    priceCAD,
+                });
             }
         }
 
         sizes.sort((a, b) => parseFloat(a.size) - parseFloat(b.size));
 
-        const productName = productData.productName?.[0]?.text?.trim() || "Unknown Product";
-        const imageUrl = productData.productImage?.[0]?.src?.value || "";
+        // Extract image src
+        const imgMatch = data.productImageSrc?.html?.match(/src="([^"]+)"/);
+        const imageUrl = imgMatch ? imgMatch[1] : "";
+        const productName = data.productName?.text?.trim() || "Unknown Product";
+        const productUrl = data.currentUrl?.url || "";
 
         console.log(`[GOAT] BrowserQL extracted: ${sizes.length} sizes`);
         if (sizes.length > 0) {

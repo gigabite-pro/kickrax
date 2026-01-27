@@ -139,101 +139,117 @@ export async function searchFlightClubBySkuBrowserQL(sku, signal) {
 
     const searchUrl = `https://www.flightclub.com/catalogsearch/result?query=${encodeURIComponent(sku)}`;
 
-    // BrowserQL mutation to search and find product
     const searchMutation = `
         mutation SearchFlightClub($searchUrl: String!) {
             goto(url: $searchUrl, waitUntil: networkIdle) {
                 status
             }
-            waitForSelector(selector: "a[data-qa='ProductItemsUrl']", timeout: 5000) {
+            waitForSelector(selector: "a[data-qa='ProductItemsUrl']") {
                 time
             }
-            html: html(selector: "body") {
-                html
+            querySelectorAll(selector: "a[data-qa='ProductItemsUrl']") {
+                outerHTML
             }
         }
     `;
 
     try {
-        const searchData = await executeBrowserQL(searchMutation, { searchUrl });
+        const response = await executeBrowserQL(searchMutation, { searchUrl });
         checkAbort(signal, "FLIGHTCLUB");
 
-        // Find product URL from HTML
-        const html = searchData.html?.content || "";
-        const $ = cheerio.load(html);
-        const link = $('a[data-qa="ProductItemsUrl"]').first();
-        const href = link.attr("href");
+        // Parse product URLs from outerHTML
+        const products = response.querySelectorAll || [];
+        const hrefs = products.map(product => {
+            const match = product.outerHTML?.match(/href="([^"]+)"/);
+            return match ? match[1] : null;
+        }).filter(Boolean);
 
-        if (!href) {
+        if (hrefs.length === 0) {
             console.log("[FLIGHTCLUB] No product found");
             return { source: SOURCES["flight-club"], sizes: [], lowestPrice: 0, available: false };
         }
 
+        // Use first product (or could match by SKU if needed)
+        const href = hrefs[0];
         const productTemplateId = href.replace(/^\//, "");
         const productUrl = `https://www.flightclub.com${href}`;
-        console.log(`[FLIGHTCLUB] Found: ${productUrl}`);
+        console.log(`[FLIGHTCLUB] Found product href: ${href}`);
+        console.log(`[FLIGHTCLUB] Product URL: ${productUrl}`);
+        console.log(`[FLIGHTCLUB] Product template ID: ${productTemplateId}`);
 
-        // Second mutation to get product page and call API
-        const productMutation = `
-            mutation ScrapeFlightClubProduct($productUrl: String!, $apiUrl: String!) {
-                goto(url: $productUrl, waitUntil: domContentLoaded) {
-                    status
-                }
-                wait1: waitForTimeout(time: 1500) {
-                    time
-                }
-                # Call API using evaluate (BrowserQL doesn't have direct fetch, so we use html and then parse)
-                html: html(selector: "body") {
-                    html
-                }
-            }
-        `;
+        // URL-encode productTemplateId to ensure it's passed correctly
+        const apiUrl = `https://www.flightclub.com/web-api/v1/product_variants?countryCode=CA&productTemplateId=${encodeURIComponent(productTemplateId)}&currency=CAD`;
+        console.log(`[FLIGHTCLUB] API URL: ${apiUrl}`);
+        console.log(`[FLIGHTCLUB] Using Puppeteer with stealth to navigate directly to API URL...`);
 
-        const apiUrl = `https://www.flightclub.com/web-api/v1/product_variants?countryCode=CA&productTemplateId=${productTemplateId}&currency=CAD`;
-        
-        // For API calls, we need to use evaluate in BrowserQL, but since BrowserQL doesn't support evaluate directly,
-        // we'll need to make the API call from Node.js after getting the product page
-        // Actually, let's use a different approach - make the API call from Node.js using fetch with cookies from BrowserQL session
-        // For now, let's fall back to getting HTML and making API call separately
-        
-        const productData = await executeBrowserQL(productMutation, { productUrl, apiUrl });
-        checkAbort(signal, "FLIGHTCLUB");
-
-        // Make API call from Node.js (we'll need to get cookies from BrowserQL session, but for simplicity, let's use fetch)
-        // Note: This might not work perfectly without cookies, but it's a start
-        let apiResponse;
+        // Use Puppeteer with stealth route to navigate directly to API URL
+        const browser = await launchBrowser();
+        let rawData;
         try {
-            apiResponse = await fetch(apiUrl, {
-                method: "GET",
-                headers: {
-                    "Accept": "application/json",
-                    "x-goat-app": "sneakers",
-                    "x-goat-sales-channel": "2",
-                },
+            const page = await createPage(browser, "FLIGHTCLUB");
+            checkAbort(signal, "FLIGHTCLUB");
+
+            // Set headers for API request
+            await page.setExtraHTTPHeaders({
+                "Accept": "application/json",
+                "Accept-Language": "en-US,en;q=0.9",
+                "x-goat-app": "sneakers",
+                "x-goat-sales-channel": "2",
             });
+
+            // Navigate directly to API URL using stealth browser
+            console.log(`[FLIGHTCLUB] Navigating to API URL...`);
+            const response = await page.goto(apiUrl, { 
+                waitUntil: "networkidle2", 
+                timeout: 60000 
+            });
+            checkAbort(signal, "FLIGHTCLUB");
+
+            if (!response || !response.ok()) {
+                const status = response?.status() || "unknown";
+                const statusText = response?.statusText() || "unknown";
+                const responseText = await response?.text().catch(() => "");
+                throw new Error(`API request failed: ${status} ${statusText} - ${responseText.substring(0, 200)}`);
+            }
+
+            // Extract JSON from response
+            rawData = await response.json();
+
+            console.log(`[FLIGHTCLUB] API Response Data:`, JSON.stringify(rawData, null, 2).substring(0, 1000));
+            console.log(`[FLIGHTCLUB] API Response Type:`, Array.isArray(rawData) ? "Array" : typeof rawData);
+
+            await page.close().catch(() => {});
         } catch (apiError) {
-            console.log(`[FLIGHTCLUB] API Error: ${apiError.message}`);
+            console.log(`[FLIGHTCLUB] Puppeteer API call failed:`, apiError.message);
+            console.log(`[FLIGHTCLUB] Error stack:`, apiError.stack);
             return { source: SOURCES["flight-club"], sizes: [], lowestPrice: 0, available: false };
+        } finally {
+            await browser.close().catch(() => {});
         }
-
-        if (!apiResponse.ok) {
-            console.log(`[FLIGHTCLUB] API Error: HTTP ${apiResponse.status}`);
-            return { source: SOURCES["flight-club"], sizes: [], lowestPrice: 0, available: false };
-        }
-
-        const rawData = await apiResponse.json();
         const variants = Array.isArray(rawData) ? rawData : rawData?.productVariants || [];
+        console.log(`[FLIGHTCLUB] Extracted ${variants.length} variants from API response`);
+        if (variants.length > 0) {
+            console.log(`[FLIGHTCLUB] First variant sample:`, JSON.stringify(variants[0], null, 2).substring(0, 500));
+        }
 
         // Process variants
         const sizeMap = new Map();
         for (const variant of variants) {
+            console.log(`[FLIGHTCLUB] Processing variant:`, {
+                size: variant.size,
+                currency: variant.lowestPriceCents?.currency,
+                amount: variant.lowestPriceCents?.amount,
+            });
             if (variant.lowestPriceCents?.currency === "CAD" && variant.lowestPriceCents?.amount) {
                 const priceCAD = Math.round(variant.lowestPriceCents.amount / 100);
                 const size = String(variant.size);
                 const existing = sizeMap.get(size);
                 if (!existing || priceCAD < existing) {
                     sizeMap.set(size, priceCAD);
+                    console.log(`[FLIGHTCLUB] Added size ${size} at $${priceCAD} CAD`);
                 }
+            } else {
+                console.log(`[FLIGHTCLUB] Skipping variant - missing price data or wrong currency`);
             }
         }
 
@@ -252,9 +268,11 @@ export async function searchFlightClubBySkuBrowserQL(sku, signal) {
         sizes.sort((a, b) => parseFloat(a.size) - parseFloat(b.size));
         const lowestPrice = sizes.length > 0 ? Math.min(...sizes.map((s) => s.priceCAD)) : 0;
 
-        console.log(`[FLIGHTCLUB] BrowserQL extracted: ${sizes.length} sizes`);
+        console.log(`[FLIGHTCLUB] Final result: ${sizes.length} sizes, lowest price: $${lowestPrice} CAD`);
         if (sizes.length > 0) {
             console.log(`[FLIGHTCLUB] Sizes: ${sizes.map(s => `${s.size}=$${s.priceCAD}`).join(", ")}`);
+        } else {
+            console.log(`[FLIGHTCLUB] No sizes found - check variant processing above`);
         }
 
         return { source: SOURCES["flight-club"], sizes, lowestPrice, available: sizes.length > 0 };

@@ -175,138 +175,101 @@ export async function searchKickscrewBySkuBrowserQL(sku, signal) {
     checkAbort(signal, "KICKSCREW");
     console.log(`[KICKSCREW] Using BrowserQL to search for SKU: ${sku}`);
 
-    const skuLower = sku.toLowerCase().replace(/-/g, "");
     const searchUrl = `https://www.kickscrew.com/en-CA/search?q=${encodeURIComponent(sku)}`;
 
-    // BrowserQL mutation to search and find product
-    const searchMutation = `
+    const mutation = `
         mutation SearchKicksCrew($searchUrl: String!) {
+            viewport(width: 1366, height: 768) {
+                width
+                height
+                time
+            }
             goto(url: $searchUrl, waitUntil: domContentLoaded) {
                 status
             }
-            wait1: waitForTimeout(time: 2000) {
+            waitForSearch: waitForTimeout(time: 2000) {
                 time
             }
-            waitForSelector(selector: "ul li a[href*='/products/']", timeout: 5000) {
+            waitForProducts: waitForSelector(selector: "a[href*='/products/']", timeout: 10000) {
                 time
             }
-            html: html(selector: "body") {
-                html
+            waitForLayoutStable: waitForTimeout(time: 3000) {
+                time
+            }
+            clickFirstProduct: click(selector: "a[href*='/products/']") {
+                x
+                y
+            }
+            waitForNavigation: waitForTimeout(time: 3000) {
+                time
+            }
+            waitForProductPage: waitForTimeout(time: 15000) {
+                time
+            }
+            waitForSizePicker: waitForSelector(selector: "#size-picker, [data-testid='size-picker-selected-info']", timeout: 20000) {
+                time
+            }
+            waitForPickerStable: waitForTimeout(time: 3000) {
+                time
+            }
+            clickSizePicker: click(selector: "button[aria-haspopup='menu']") {
+                x
+                y
+            }
+            waitForSizeMenu: waitForTimeout(time: 3000) {
+                time
+            }
+            waitForSizeOptions: waitForSelector(selector: "li[data-testid^='size-option-']", timeout: 15000) {
+                time
+            }
+            sizeValues: querySelectorAll(selector: "li[data-testid^='size-option-'] .font-semibold") {
+                text: innerText
+            }
+            priceValues: querySelectorAll(selector: "li[data-testid^='size-option-'] .text-sm") {
+                text: innerText
+            }
+            currentUrl: url {
+                url
             }
         }
     `;
 
     try {
-        const searchData = await executeBrowserQL(searchMutation, { searchUrl });
+        const data = await executeBrowserQL(mutation, { searchUrl });
         checkAbort(signal, "KICKSCREW");
 
-        // Find product URL from HTML
-        const html = searchData.html?.content || "";
-        const $ = cheerio.load(html);
-        let productUrl = null;
-
-        $('a[href*="/products/"]').each((_, el) => {
-            const href = $(el).attr("href") || "";
-            if (href.toLowerCase().replace(/-/g, "").includes(skuLower)) {
-                productUrl = href.startsWith("http") ? href : `https://www.kickscrew.com${href}`;
-                return false;
-            }
-        });
-
-        if (!productUrl) {
-            // Try first product link
-            const firstLink = $('a[href*="/products/"]').first();
-            const href = firstLink.attr("href");
-            if (href && !href.includes("/collections/")) {
-                productUrl = href.startsWith("http") ? href : `https://www.kickscrew.com${href}`;
-            }
+        // Parse sizes using provided function
+        function parseKicksCrewSizes(data) {
+            return data.sizeValues.map((sizeObj, index) => {
+                const size = sizeObj.text.trim().replace('US(M) ', '');
+                const priceText = data.priceValues[index]?.text.trim() || null;
+                const price = (priceText && priceText !== '$--') ? priceText : null;
+                
+                return { size, price };
+            }).filter(item => item.price); // Only return items with valid prices
         }
 
-        if (!productUrl) {
-            console.log("[KICKSCREW] No product found");
-            return null;
-        }
+        const parsedSizes = parseKicksCrewSizes(data);
 
-        console.log(`[KICKSCREW] Found: ${productUrl}`);
-
-        // Second mutation to get product page data
-        const productMutation = `
-            mutation ScrapeKicksCrewProduct($productUrl: String!) {
-                goto(url: $productUrl, waitUntil: networkIdle) {
-                    status
-                }
-                wait1: waitForTimeout(time: 4000) {
-                    time
-                }
-                # Try clicking size picker
-                clickSizePicker: click(selector: ".size-picker, button[aria-label*='size' i], button[aria-label*='Size' i], [data-testid='size-picker'], .size-selector, [class*='size-picker'], [class*='SizePicker']") {
-                    x
-                    y
-                }
-                wait2: waitForTimeout(time: 2000) {
-                    time
-                }
-                waitForSelector(selector: "[data-testid^='size-option-'], li[role='menuitem']", timeout: 5000) {
-                    time
-                }
-                # Extract sizes
-                sizes: mapSelector(selector: "[data-testid^='size-option-'], li[role='menuitem']", wait: true) {
-                    sizeText: mapSelector(selector: ".font-semibold, [class*='size']") {
-                        text: innerText
-                    }
-                    priceText: mapSelector(selector: ".text-sm:not(.font-semibold), .text-xs, [class*='price']") {
-                        text: innerText
-                    }
-                    availableAttr: attribute(name: "data-available") {
-                        value
-                    }
-                }
-                # Get product name and image
-                productName: mapSelector(selector: "h1") {
-                    text: innerText
-                }
-                productImage: mapSelector(selector: "img[alt*='product'], img[src*='cdn.kickscrew']") {
-                    src: attribute(name: "src") {
-                        value
-                    }
-                }
-            }
-        `;
-
-        const productData = await executeBrowserQL(productMutation, { productUrl });
-        checkAbort(signal, "KICKSCREW");
-
-        // Process sizes
+        // Convert to our format with price conversion
         const sizes = [];
-        const sizesData = productData.sizes || [];
-
-        for (const item of sizesData) {
-            const sizeText = item.sizeText?.[0]?.text?.trim() || "";
-            const priceText = item.priceText?.[0]?.text?.trim() || null;
-            const available = item.availableAttr?.value !== "false";
-
-            if (priceText && available && priceText !== "$--" && !priceText.includes("--")) {
-                const sizeMatch = sizeText.match(/([\d.]+)/);
-                const size = sizeMatch ? sizeMatch[1] : sizeText;
-
-                if (size && /^\d/.test(size)) {
-                    const priceMatch = priceText.match(/CA?\$?([\d,]+)/);
-                    if (priceMatch) {
-                        const priceCAD = parseInt(priceMatch[1].replace(/,/g, ""));
-                        sizes.push({
-                            size,
-                            price: Math.round(priceCAD / USD_TO_CAD_RATE),
-                            priceCAD,
-                        });
-                    }
-                }
+        for (const item of parsedSizes) {
+            const priceMatch = item.price.match(/CA?\$?([\d,]+)/);
+            if (priceMatch) {
+                const priceCAD = parseInt(priceMatch[1].replace(/,/g, ""), 10);
+                sizes.push({
+                    size: item.size,
+                    price: Math.round(priceCAD / USD_TO_CAD_RATE),
+                    priceCAD,
+                });
             }
         }
 
         sizes.sort((a, b) => parseFloat(a.size) - parseFloat(b.size));
 
-        const productName = productData.productName?.[0]?.text?.trim() || "Unknown Product";
-        const imageUrl = productData.productImage?.[0]?.src?.value || "";
+        const productUrl = data.currentUrl?.url || "";
+        const productName = "Unknown Product"; // Not extracted in mutation
+        const imageUrl = ""; // Not extracted in mutation
 
         console.log(`[KICKSCREW] BrowserQL extracted: ${sizes.length} sizes`);
         if (sizes.length > 0) {

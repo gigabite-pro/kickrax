@@ -32,6 +32,8 @@ export async function executeBrowserQL(mutation, variables = {}) {
     }
 
     const endpoint = getBrowserQLEndpoint();
+    const operationName = mutation.match(/mutation\s+(\w+)/)?.[1] || "Unknown";
+    console.log(`[BrowserQL] Making request: ${operationName}`, Object.keys(variables));
 
     try {
         const response = await fetch(endpoint, {

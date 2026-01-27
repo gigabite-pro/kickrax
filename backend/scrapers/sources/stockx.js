@@ -581,6 +581,9 @@ export async function getProductDataWithPricesBrowserQL(productUrl, signal) {
         }
 
         console.log(`[StockX] BrowserQL extracted: Style ID: ${styleId || "NOT FOUND"}, ${sizes.length} sizes`);
+        if (sizes.length > 0) {
+            console.log(`[StockX] Sizes:`, sizes.map(s => `${s.size}=$${s.priceCAD}`).join(", "));
+        }
         
         return { styleId, productName, productUrl, imageUrl, sizes };
     } catch (error) {
